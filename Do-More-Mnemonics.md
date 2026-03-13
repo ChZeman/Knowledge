@@ -39,7 +39,7 @@ These rules were confirmed by iterative import testing. Violating them produces 
 
 ### Rule 2: Output instructions terminate a rung
 
-`SET`, `RST`, `OUT`, `MOVE`, `STRPRINT`, `TMR`, `MQTTPUB`, `MQTTSUB`, `PING` are output-side instructions. **Nothing can follow them in the same rung.** Any subsequent logic must be a new rung starting with a fresh `STR`-family contact.
+`SET`, `RST`, `OUT`, `MOVE`, `STRPRINT`, `TMR`, `MQTTPUB`, `MQTTSUB`, `PING`, `NETTIME` are output-side instructions. **Nothing can follow them in the same rung.** Any subsequent logic must be a new rung starting with a fresh `STR`-family contact.
 
 > ❌ This is illegal — SET followed by STRPRINT in same rung:
 > ```
@@ -244,6 +244,43 @@ PING @IntEthernet 0x1 <ip-dword> 500 DST511 0x0 <ok-bit> <fail-bit>
 - P1: `@IntEthernet` — use the Ethernet interface directly
 - P3: IP address as a **decimal DWORD** (e.g. `184156774` = 10.250.2.102)
 - ❌ `PING @MQTT_DEPT ...` — MQTT device references are not valid for PING
+
+### NETTIME ⚠️
+SNTP client — syncs the PLC real-time clock to an NTP server.
+
+> ⚠️ Text import syntax unconfirmed — needs hardware verification before use in production code.
+
+**Behavior:**
+- **Edge-triggered** (OFF→ON transition) and **fully asynchronous** — runs to completion even if input goes OFF before it finishes
+- Retrieves UTC time from NTP server; applies `$TimeZone` (DST384) and `$SummerTime` (ST768) offsets
+- On success sets `$TimeSynced` (ST23)
+
+**Parameters:**
+| # | Description | Notes |
+|---|---|---|
+| P1 | Device | `@IntEthernet` |
+| P2 | NTP server IP | Decimal DWORD |
+| P3 | UDP port | `123` (standard NTP) |
+| P4 | Timeout | ms constant |
+| P5 | On Success bit | SET when sync succeeds |
+| P6 | On Error bit | SET when sync fails |
+
+**Suspected text import syntax (⚠️ unconfirmed):**
+```
+NETTIME @IntEthernet 184156782 123 5000 C_NtpOK C_NtpErr
+```
+
+**Usage pattern — hourly sync using a timer:**
+```
+// T_NtpSync fires every 3600000ms (1 hour), edge triggers NETTIME
+STRN T_NtpSync.Done
+TMR T_NtpSync 3600000
+
+STR T_NtpSync.Done
+NETTIME @IntEthernet 184156782 123 5000 C_NtpOK C_NtpErr
+```
+
+> ❌ Do NOT use a held-ON condition to trigger NETTIME — it is edge-triggered and requires OFF→ON transition.
 
 ---
 
@@ -452,10 +489,12 @@ MOVE DST18 D1000       // load active IP
 ```
 
 **Decimal DWORD reference:**
-| IP | Decimal DWORD |
-|---|---|
-| 10.250.2.102 | 184156774 |
-| 10.15.144.14 | 168792078 |
+| IP | Decimal DWORD | Description |
+|---|---|---|
+| 10.250.2.102 | 184156774 | Mosquitto MQTT broker (Dept) |
+| 10.250.2.110 | 184156782 | NTP Primary (ntp1) |
+| 10.250.2.210 | 184156882 | NTP Secondary (ntp2) |
+| 10.15.144.14 | 168792078 | Corporate MQTT broker |
 
 ---
 
