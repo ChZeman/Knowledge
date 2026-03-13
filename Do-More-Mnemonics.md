@@ -264,10 +264,10 @@ STRPRINT SS2 0x4 "FmtBit(X0, val)"
 - ❌ Cannot MOVE a string literal into an SS register — use STRPRINT instead
 
 ### STRFIND ✅
-Search for a substring within a string.
+Search for a substring within a string. **Requires exactly 6 parameters.**
 ```
 MOVE 0 D2000
-STRFIND SL0 0x0 D2000 C25 "mac="
+STRFIND SL0 0x0 D2000 C25 "mac=" C26
 ```
 
 **Parameters:**
@@ -278,12 +278,13 @@ STRFIND SL0 0x0 D2000 C25 "mac="
 | P3 | `D2000` | In/out offset register — **must be a user D or V register**. DST registers and inline constants are invalid here. |
 | P4 | C bit | Set-if-found bit |
 | P5 | `"mac="` | Find text — string literal or SS register |
+| P6 | C bit | Set-if-**not**-found bit — **required, cannot be omitted** |
 
-- Max 6 parameters — no set-if-not-found parameter, no case-sensitivity parameter
 - Pre-zero the offset register before calling: `MOVE 0 D2000`
 - Result: offset register contains position of found text, or -1 if not found
 - ❌ DST registers (e.g. DST500) in P3 are treated as constants — do not use
 - ❌ Inline constant (e.g. `0x0`) in P3 is invalid
+- ❌ Omitting P6 produces "too few parameters" import error
 
 ### STRCOPY ✅
 Copy characters from one string to another.
