@@ -342,7 +342,7 @@ STRFIND SL0 0x0 D2000 C25 C26 """mac="""
 | P5 | C bit | Set-if-**not**-found bit — **must be a C bit, not a string** |
 | P6 | `"""mac="""` | Find text — **string literal (last parameter)** |
 
-> ❌ `STRFIND SL0 0x0 D2000 C25 """mac=""" C26` — wrong order, causes "P5 Set if NOT found: Parameter 5 should not be a string"
+> ❌ `STRFIND SL0 0x0 D2000 C25 """mac="""` C26 — wrong order, causes "P5 Set if NOT found: Parameter 5 should not be a string"
 
 - Pre-zero the offset register before calling: `MOVE 0 D2000`
 - ❌ DST registers in P3 are treated as constants — do not use
@@ -380,14 +380,63 @@ STRSUB SL0 D2001 0x0 64 SS0
 
 ---
 
-## System Variables
+## System Variables and Named Locations
 
+Source: BRX User Manual, 4th Edition, Appendix D (confirmed from official manual).
+
+### Scan Time Registers
+| Register | Nickname | Description |
+|---|---|---|
+| `DST0` | `$ScanCounter` | Number of scans since last STOP→RUN transition |
+| `DST1` | `$ScanTime` | Filtered average scan time in **microseconds** |
+| `DST2` | `$MinScanTime` | Shortest scan time since last STOP→RUN (microseconds) |
+| `DST3` | `$MaxScanTime` | Longest scan time since last STOP→RUN (microseconds) |
+| `DST4` | `$ElapsedTicks` | Last scan time in **microseconds** |
+
+> Note: scan time values are in **microseconds**, not milliseconds. Divide by 1000 for ms.
+
+### CPU / PLC Status Registers
+| Register | Nickname | Description |
+|---|---|---|
+| `DST5` | `$Errors` | Bitmask of all active error flags |
+| `DST6` | `$Warnings` | Bitmask of all active warning flags |
+| `DST10` | `$PLCMode` | 2=STOP, 3=RUN |
+| `DST29` | `$PLCType` | 7 = BRX-DM1E |
+| `DST51` | `$FatalTermCode` | Fatal error code (0=none, 1=watchdog/IO/memory, 2=local module not responding, 7=too many modules) |
+| `DST53` | `$PLCSubType` | 149 = BX-DM1E-10ED23-D (our hardware) |
+
+### Network Registers
+| Register | Nickname | Description |
+|---|---|---|
+| `DST18` | `$IPAddress` | Active IP as DWORD |
+| `DST19` | `$NetMask` | Subnet mask as DWORD |
+| `DST20` | `$Gateway` | Gateway IP as DWORD |
+
+### CPU Health Status Bits (ST bits — usable as contacts)
+| Bit | Nickname | Description |
+|---|---|---|
+| `ST1` | `$On` | Always ON — use as unconditional rung enable |
+| `ST10` | `$HasErrors` | Any runtime error active |
+| `ST11` | `$HasWarnings` | Any runtime warning active |
+| `ST13` | `$WatchdogReboot` | Watchdog reboot has occurred |
+| `ST14` | `$ModuleFailed` | Any installed module fails validation (ID mismatch) |
+| `ST134` | `$InstIOChanged` | I/O module layout changed since last power-on |
+| `ST143` | `$DriverError` | Any device reporting a runtime error |
+| `ST148` | `$CriticalIOError` | Permanent I/O shutdown — power cycle required |
+| `ST149` | `$BatteryLow` | Battery below minimum threshold |
+
+> **Important — per-slot status:** There are NO per-slot DST registers for individual expansion module presence, type, or fault. Module health is reported as aggregate system bits only (`ST14`, `ST134`, `ST148`). Per-slot detail is not accessible via ladder logic DST registers.
+
+### Clock / Time Bits
+| Bit | Nickname | Description |
+|---|---|---|
+| `ST3` | `$1Minute` | 50% duty cycle, 30s ON / 30s OFF |
+| `ST4` | `$1Second` | 50% duty cycle, 0.5s ON / 0.5s OFF |
+| `ST5` | `$100ms` | 50% duty cycle, 50ms ON / 50ms OFF |
+
+### Other Useful Variables
 | Variable | Description |
 |---|---|
-| `ST1` | First-scan bit |
-| `DST18` | Active IP address as a 32-bit DWORD |
-| `DST27` | PLC model string |
-| `DST28` | PLC firmware version string |
 | `SerialNum` | PLC MAC address — unique hardware identity |
 | `DST511` | General-purpose status/error register for network instructions |
 | `D1000:UB2` | Byte 2 (2nd octet) of a DWORD — used for IP network classification |
