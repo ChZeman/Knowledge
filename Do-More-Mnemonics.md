@@ -126,11 +126,9 @@ TMR T0 10000
 ```
 
 ### Timer Status Bits
-- `T0.Done` ✅ — valid **only as the first (STR) contact in a rung**
+- `T0.Done` ✅ — valid as a contact in any rung position (STR, AND, etc.)
 - `T0.TT` ❌ — **not valid** in text import
 - `T0.Run` ❌ — **not valid** in text import
-
-> **Important:** `T0.Done` cannot appear after `AND`, after `OUT`, or in `RST`. It must be the sole or first contact in its rung. If you need to act on a timer done state mid-rung, use a helper C bit: `STR T0.Done / SET C_bit`, then use `C_bit` in subsequent logic.
 
 ---
 
@@ -186,7 +184,7 @@ PING @IntEthernet 0x1 <ip-dword> 500 DST511 0x0 <ok-bit> <fail-bit>
 ### MQTTPUB ✅
 Publish a message to an MQTT broker.
 ```
-MQTTPUB @MQTT_DEPT 0x11 5000 """bootstrap/hello""" "3 0x1110 SerialNum SS1" 0x0 C12 C13 DST511
+MQTTPUB @MQTT_DEPT 0x11 5000 """bootstrap/hello/""" "3 0x10 ""bootstrap/hello"" SS1" 0x0 C12 C13 DST511
 ```
 
 **Parameters:**
@@ -202,22 +200,16 @@ MQTTPUB @MQTT_DEPT 0x11 5000 """bootstrap/hello""" "3 0x1110 SerialNum SS1" 0x0 
 | P8 | C bit | Publish-fail bit |
 | P9 | `DST511` | Status register |
 
-**P5 payload table format:**
-- `count` = total items including the flags word
-- Confirmed: `"3 0x1110 SerialNum SS1"` (flags + MAC + payload string = 3 items)
-- Always include `SerialNum` as item 2 when publishing string payloads
-
-**P4/P5 topic prefix mode:**
-When P4 is an SS register, it is treated as an **Optional Topic Prefix**. P5 entries use a suffix string and must set the prefix-use flag bit:
-```
-MQTTPUB @MQTT_DEPT 0x11 5000 SS0 "3 0x1111 ""/identity/mac"" SS2" 0x0 C12 C13 DST511
-```
-
-**P5 flag values (when using SS prefix in P4):**
+**P5 payload table flag values:**
 | Flag | Meaning |
 |---|---|
-| `0x1111` | Use-prefix + retain + string + if-changed |
-| `0x1110` | Use-prefix + no-retain + string + if-changed |
+| `0x10` | No-retain, publish on change |
+| `0x11` | Retain, publish on change |
+
+**P4/P5 topic prefix mode** (when P4 is an SS register):
+```
+MQTTPUB @MQTT_DEPT 0x11 5000 SS0 "3 0x11 ""/identity/mac"" SS2" 0x0 C12 C13 DST511
+```
 
 ### MQTTSUB ✅
 Subscribe to an MQTT topic.
@@ -236,7 +228,7 @@ MQTTSUB @MQTT_DEPT 0x10 """bootstrap/provision""" "3 0x10 ""bootstrap/provision"
 | P6 | C bit | Error bit |
 | P7 | `DST511` | Status register |
 
-> ⚠️ Do-More `MQTTSUB` does **not** support wildcard topics. All subscriptions must use static topic strings. For broadcast patterns, all PLCs subscribe to the same topic and filter by payload content.
+> ⚠️ Do-More `MQTTSUB` does **not** support wildcard topics. All subscriptions must use static topic strings.
 
 ### MQTT Device Definition ✅
 ```
@@ -245,7 +237,6 @@ MQTTSUB @MQTT_DEPT 0x10 """bootstrap/provision""" "3 0x10 ""bootstrap/provision"
  @MQTT_CORP, 32770, 36, 3, 30, , 168792078, 1883, 4294967295, ignition, RideControl, , 
 #END
 ```
-Field order: `name, type-id, ?, keepalive, timeout, hostname, ip-dword, port, ?, username, password, ?, ?`
 
 ---
 
@@ -261,13 +252,15 @@ STRPRINT SS2 0x4 "FmtBit(X0, val)"
 - P2: `0x4` (format flags)
 - `FmtInt(reg, ipaddr)` — formats a DWORD as dotted-decimal IP string
 - `FmtBit(bit, val)` — formats a bit as `0` or `1`
-- ❌ Cannot MOVE a string literal into an SS register — use STRPRINT instead
 
 ### STRFIND ✅
 Search for a substring within a string. **Requires exactly 6 parameters.**
+
+> ⚠️ **Parameter order:** find-text is the **last** (P6) parameter, NOT P5.
+
 ```
 MOVE 0 D2000
-STRFIND SL0 0x0 D2000 C25 "mac=" C26
+STRFIND SL0 0x0 D2000 C25 C26 """mac="""
 ```
 
 **Parameters:**
@@ -275,16 +268,16 @@ STRFIND SL0 0x0 D2000 C25 "mac=" C26
 |---|---|---|
 | P1 | Source string | SL or SS register |
 | P2 | `0x0` | Direction — **must be hex (`0x0`), not decimal (`0`)** |
-| P3 | `D2000` | In/out offset register — **must be a user D or V register**. DST registers and inline constants are invalid here. |
-| P4 | C bit | Set-if-found bit |
-| P5 | `"mac="` | Find text — string literal or SS register |
-| P6 | C bit | Set-if-**not**-found bit — **required, cannot be omitted** |
+| P3 | `D2000` | In/out offset register — **must be a user D or V register**. DST registers and inline constants are invalid. |
+| P4 | C bit | Set-if-**found** bit |
+| P5 | C bit | Set-if-**not**-found bit — **must be a C bit, not a string** |
+| P6 | `"""mac="""` | Find text — **string literal (last parameter)** |
+
+> ❌ `STRFIND SL0 0x0 D2000 C25 """mac=""" C26` — wrong order, string in P5 causes "P5 Set if NOT found: Parameter 5 should not be a string" error
 
 - Pre-zero the offset register before calling: `MOVE 0 D2000`
-- Result: offset register contains position of found text, or -1 if not found
-- ❌ DST registers (e.g. DST500) in P3 are treated as constants — do not use
-- ❌ Inline constant (e.g. `0x0`) in P3 is invalid
-- ❌ Omitting P6 produces "too few parameters" import error
+- ❌ DST registers in P3 are treated as constants — do not use
+- ❌ Omitting P5 or P6 produces import error
 
 ### STRCOPY ✅
 Copy characters from one string to another.
@@ -294,34 +287,26 @@ STRCOPY SL0 SS0 64
 - P1: Source string
 - P2: Destination — **must be an SS register** (❌ D registers invalid)
 - P3: Character count
-- Max 3 parameters
 
 ### STRCLEAR ✅
 Clear a string register.
 ```
 STRCLEAR SL0 1
 ```
-- P1: String register to clear
-- P2: Count of registers to clear
-- ❌ `STRCLEAR SL0` (1 param) — invalid, count is required
+- P2: Count is **required** — ❌ `STRCLEAR SL0` (1 param) is invalid
 
 ### STRSUB ⚠️
-Extract a substring. Max 5 parameters. Not yet fully confirmed in text import.
+Extract a substring. Not yet fully confirmed in text import.
 ```
 STRSUB SL0 D2001 0x0 64 SS0
 ```
-- P1: Source
-- P2: Start offset (from STRFIND result register)
-- P3: Offset-from flag (`0x0` = from beginning) — must be hex
-- P4: Character count
-- P5: Destination SS register
 
 ### String Register Types
 | Type | Description |
 |---|---|
 | `SS0`–`SS127` | Short string registers |
 | `SL0`–`SLn` | Long string registers — used as MQTTSUB receive buffers |
-| `SL0.length` ✅ | Valid field — use to check if buffer has received data (`STRNE SL0.length 0`) |
+| `SL0.length` ✅ | Valid field — use to check if buffer has data (`STRNE SL0.length 0`) |
 | `SL0.New` ❌ | Not valid in text import |
 
 ---
@@ -347,7 +332,6 @@ Do-More stores IPs as 32-bit DWORDs.
 MOVE DST18 D1000       // load active IP
 // D1000:UB2 = 2nd octet
 ```
-- `FmtInt(D1000, ipaddr)` in STRPRINT formats as dotted-decimal
 
 **Decimal DWORD reference:**
 | IP | Decimal DWORD |
