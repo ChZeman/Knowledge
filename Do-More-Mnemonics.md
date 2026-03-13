@@ -4,7 +4,7 @@ This document covers instruction mnemonics and parameter syntax for the **Do-Mor
 
 > **Designer version tested:** 2.11.2  
 > **Hardware:** BX-DM1E-10ED23-D  
-> Syntax marked ✅ has been confirmed working via hardware import. Syntax marked ⚠️ has not yet been confirmed in the text import context.
+> Syntax marked ✅ has been confirmed working via clean hardware import. Syntax marked ⚠️ has not yet been confirmed in the text import context.
 
 ---
 
@@ -14,11 +14,73 @@ This document covers instruction mnemonics and parameter syntax for the **Do-Mor
 - Each rung is a sequence of instructions with no explicit rung delimiter — a new contact instruction (`STR`, `STRE`, `STRNE`, etc.) starts a new rung
 - Inline string literals use **doubled double-quotes** for embedded quotes: `""mac=""` produces `mac=` in the string
 - Triple double-quotes `"""text"""` produce a quoted string literal as a parameter value
-- Hex constants use `0x` prefix: `0x0`, `0x1110`, etc.
+- Hex constants use `0x` prefix: `0x0`, `0x10`, etc.
 - Comments use `//`
 - Device definitions go in `#BEGIN DEVICE` / `#END` blocks
 - Program declarations go in `#BEGIN MEM_CONFIG` / `#END` blocks
 - Element documentation goes in `#BEGIN ELEMENT_DOC` / `#END` blocks
+
+---
+
+## Critical Rung Structure Rules ✅
+
+These rules were confirmed by iterative import testing. Violating them produces "Rung Contains Too Many STR Instructions" or "Illegal Rung" errors.
+
+### Rule 1: STR-family always starts a new rung
+
+`STR`, `STRE`, `STRNE`, `STRN` always begin a **new rung**. They cannot appear mid-rung as series conditions. Use `AND`-family for series conditions:
+
+| Use this... | ...not this, mid-rung |
+|---|---|
+| `ANDNE SL0.length 0` | `STRNE SL0.length 0` |
+| `ANDN C32` | `STRN C32` |
+| `ANDN T3.Done` | `STRN T3.Done` |
+| `ANDNE V1021 0` | `STRNE V1021 0` |
+
+### Rule 2: Output instructions terminate a rung
+
+`SET`, `RST`, `OUT`, `MOVE`, `STRPRINT`, `TMR`, `MQTTPUB`, `MQTTSUB`, `PING` are output-side instructions. **Nothing can follow them in the same rung.** Any subsequent logic must be a new rung starting with a fresh `STR`-family contact.
+
+> ❌ This is illegal — SET followed by STRPRINT in same rung:
+> ```
+> STRE V1010 2
+> ANDN C32
+> SET C32
+> STRPRINT SS1 ...    ← illegal, SET already ended the rung
+> ```
+
+> ✅ Correct — split into separate rungs:
+> ```
+> STRE V1010 2
+> ANDN C32
+> SET C32
+>
+> STRE V1010 2
+> AND C32
+> STRPRINT SS1 ...
+> ```
+
+### Rule 3: STRPRINT and DUPBOOL/POPBOOL cannot coexist in the same rung
+
+If a rung needs to both format a string and branch with DUPBOOL, split them:
+
+> ✅ Correct pattern:
+> ```
+> // Rung B: build payload
+> STRE V1010 2
+> AND C32
+> STRPRINT SS1 0x4 "..."
+>
+> // Rung C: publish (branch only, no STRPRINT)
+> STRE V1010 2
+> AND C32
+> DUPBOOL
+> ANDE V1001 1
+> MQTTPUB @MQTT_DEPT ...
+> POPBOOL
+> ANDE V1001 2
+> MQTTPUB @MQTT_CORP ...
+> ```
 
 ---
 
@@ -45,21 +107,25 @@ STR C1
 ```
 
 ### STRN ✅
-Load a normally-closed contact.
+Load a normally-closed contact (rung start only).
 ```
-STRN T3.Done
+STRN T1.Done
+TMR T1 10000
 ```
+> ❌ Do NOT use STRN mid-rung — use ANDN instead.
 
 ### STRE ✅
-Load contact — equal comparison.
+Load contact — equal comparison (rung start only).
 ```
 STRE V1010 0
 ```
 
 ### STRNE ✅
-Load contact — not-equal comparison.
+Load contact — not-equal comparison (rung start only).
 ```
-STRNE V1001 0
+STRNE D1000:UB2 250
+ANDNE D1000:UB2 15
+MOVE 0 V1000
 ```
 
 ### AND ✅
@@ -72,6 +138,7 @@ AND C1
 Series normally-closed contact.
 ```
 ANDN C16
+ANDN T3.Done
 ```
 
 ### ANDE ✅
@@ -83,29 +150,29 @@ ANDE V1001 1
 ### ANDNE ✅
 Series not-equal comparison.
 ```
-ANDNE V1001 0
+ANDNE SL0.length 0
 ```
 
 ### OUT ✅
-Output coil.
+Output coil (terminates rung).
 ```
-OUT Y2
+OUT C0
 ```
 
 ### SET ✅
-Set (latch) a coil.
+Set (latch) a coil (terminates rung).
 ```
 SET C16
 ```
 
 ### RST ✅
-Reset (unlatch) a single coil.
+Reset (unlatch) a single coil (terminates rung).
 ```
 RST C16
 ```
 
 ### RSTR ✅
-Reset a range of coils.
+Reset a range of coils (terminates rung).
 - **Max 2 operands per instruction**
 - **Second operand ID must be ≥ first**
 ```
@@ -120,13 +187,13 @@ RSTR C22 C23
 ## Timer Instructions
 
 ### TMR ✅
-On-delay timer. Preset in milliseconds.
+On-delay timer. Preset in milliseconds (terminates rung).
 ```
 TMR T0 10000
 ```
 
 ### Timer Status Bits
-- `T0.Done` ✅ — valid as a contact in any rung position (STR, AND, etc.)
+- `T0.Done` ✅ — valid as a contact in any rung position (STR, AND, ANDN, etc.)
 - `T0.TT` ❌ — **not valid** in text import
 - `T0.Run` ❌ — **not valid** in text import
 
@@ -135,7 +202,7 @@ TMR T0 10000
 ## Move / Math Instructions
 
 ### MOVE ✅
-Copy a value from source to destination.
+Copy a value from source to destination (terminates rung).
 ```
 MOVE DST18 D1000
 MOVE 1 V1000
@@ -144,7 +211,7 @@ MOVE 0 D2000
 > ❌ `MOVE ""mac="" SS8` — cannot MOVE a string literal into a register; use STRPRINT instead
 
 ### ADDD ❌
-Not a valid text import instruction. Avoid inline arithmetic — restructure logic to use pre-zeroed registers updated by other instructions.
+Not a valid text import instruction.
 
 ### MATH ⚠️
 Not yet confirmed in text import context.
@@ -154,7 +221,7 @@ Not yet confirmed in text import context.
 ## Branch Instructions
 
 ### DUPBOOL / POPBOOL ✅
-Fork a rung condition into two parallel branches. Commonly used to send the same condition to two different MQTT device paths.
+Fork a rung condition into two parallel branches.
 ```
 STR C0
 DUPBOOL
@@ -164,6 +231,7 @@ POPBOOL
 ANDE V1001 2
 PING @IntEthernet 0x1 168792078 500 DST511 0x0 C1 C2
 ```
+> ❌ Cannot mix STRPRINT and DUPBOOL in the same rung — put STRPRINT in its own preceding rung.
 
 ---
 
@@ -182,7 +250,7 @@ PING @IntEthernet 0x1 <ip-dword> 500 DST511 0x0 <ok-bit> <fail-bit>
 ## MQTT Instructions
 
 ### MQTTPUB ✅
-Publish a message to an MQTT broker.
+Publish a message to an MQTT broker (terminates rung).
 ```
 MQTTPUB @MQTT_DEPT 0x11 5000 """bootstrap/hello/""" "3 0x10 ""bootstrap/hello"" SS1" 0x0 C12 C13 DST511
 ```
@@ -212,7 +280,7 @@ MQTTPUB @MQTT_DEPT 0x11 5000 SS0 "3 0x11 ""/identity/mac"" SS2" 0x0 C12 C13 DST5
 ```
 
 ### MQTTSUB ✅
-Subscribe to an MQTT topic.
+Subscribe to an MQTT topic (terminates rung).
 ```
 MQTTSUB @MQTT_DEPT 0x10 """bootstrap/provision""" "3 0x10 ""bootstrap/provision"" SL0" C23 C13 DST511
 ```
@@ -243,15 +311,16 @@ MQTTSUB @MQTT_DEPT 0x10 """bootstrap/provision""" "3 0x10 ""bootstrap/provision"
 ## String Instructions
 
 ### STRPRINT ✅
-Format a string into a destination SS register.
+Format a string into a destination SS register (terminates rung).
 ```
-STRPRINT SS1 0x4 """mac="" SerialNum "";model="" DST27 "";fw="" DST28 "";ip="" D2040 "";"""
+STRPRINT SS1 0x4 """mac="" SerialNum "";ip="" D2040 "";"""
 STRPRINT SS2 0x4 "FmtInt(D2040, ipaddr)"
 STRPRINT SS2 0x4 "FmtBit(X0, val)"
 ```
 - P2: `0x4` (format flags)
 - `FmtInt(reg, ipaddr)` — formats a DWORD as dotted-decimal IP string
 - `FmtBit(bit, val)` — formats a bit as `0` or `1`
+- ❌ Cannot mix STRPRINT and DUPBOOL in the same rung
 
 ### STRFIND ✅
 Search for a substring within a string. **Requires exactly 6 parameters.**
@@ -273,14 +342,14 @@ STRFIND SL0 0x0 D2000 C25 C26 """mac="""
 | P5 | C bit | Set-if-**not**-found bit — **must be a C bit, not a string** |
 | P6 | `"""mac="""` | Find text — **string literal (last parameter)** |
 
-> ❌ `STRFIND SL0 0x0 D2000 C25 """mac=""" C26` — wrong order, string in P5 causes "P5 Set if NOT found: Parameter 5 should not be a string" error
+> ❌ `STRFIND SL0 0x0 D2000 C25 """mac=""" C26` — wrong order, causes "P5 Set if NOT found: Parameter 5 should not be a string"
 
 - Pre-zero the offset register before calling: `MOVE 0 D2000`
 - ❌ DST registers in P3 are treated as constants — do not use
 - ❌ Omitting P5 or P6 produces import error
 
 ### STRCOPY ✅
-Copy characters from one string to another.
+Copy characters from one string to another (terminates rung).
 ```
 STRCOPY SL0 SS0 64
 ```
@@ -289,7 +358,7 @@ STRCOPY SL0 SS0 64
 - P3: Character count
 
 ### STRCLEAR ✅
-Clear a string register.
+Clear a string register (terminates rung).
 ```
 STRCLEAR SL0 1
 ```
@@ -306,7 +375,7 @@ STRSUB SL0 D2001 0x0 64 SS0
 |---|---|
 | `SS0`–`SS127` | Short string registers |
 | `SL0`–`SLn` | Long string registers — used as MQTTSUB receive buffers |
-| `SL0.length` ✅ | Valid field — use to check if buffer has data (`STRNE SL0.length 0`) |
+| `SL0.length` ✅ | Valid field — use to check if buffer has data (`ANDNE SL0.length 0`) |
 | `SL0.New` ❌ | Not valid in text import |
 
 ---
