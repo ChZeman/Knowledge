@@ -132,9 +132,9 @@ If a rung needs to both format a string and branch with DUPBOOL, split them:
 > ...
 > ```
 
-### Rule 5: MQTTPUB SS0 prefix-mode topic suffixes must NOT have a leading slash ✅
+### Rule 5: MQTTPUB SS-register prefix-mode topic suffixes must NOT have a leading slash ✅
 
-When P4 is an SS register (prefix mode), SS0 already ends with `/` from the provision payload (e.g. `Buildings/0000/`). A leading slash on the suffix produces an absolute topic that ignores SS0 entirely, routing to the wrong place on the broker.
+When P4 is an SS register (prefix mode), the SS register already ends with `/`. A leading slash on the P5 topic suffix produces an absolute topic that ignores the prefix entirely.
 
 > ❌ Wrong — leading slash makes topic absolute, ignores SS0:
 > ```
@@ -142,13 +142,32 @@ When P4 is an SS register (prefix mode), SS0 already ends with `/` from the prov
 > // publishes to: /health/cpu_errors  (NOT Buildings/0000/health/cpu_errors)
 > ```
 
-> ✅ Correct — no leading slash, SS0 prefix concatenates cleanly:
+> ✅ Correct — no leading slash, prefix concatenates cleanly:
 > ```
 > MQTTPUB @MQTT_DEPT 0x11 5000 SS0 "3 0x10 ""health/cpu_errors"" ST10" ...
 > // publishes to: Buildings/0000/health/cpu_errors  ✅
 > ```
 
-This applies to all SS0 prefix-mode topic suffixes — MQTTPUB and STRPRINT alike.
+This applies to all SS-register prefix-mode topic suffixes — MQTTPUB, MQTTSUB, and STRPRINT alike.
+
+### Rule 6: Never put a fixed literal in P4 AND a topic in P5 — they concatenate ✅
+
+When P4 is a fixed string literal (e.g. `"""bootstrap/hello/"""`) AND P5 also contains a topic string (e.g. `""bootstrap/hello""`), the broker receives the concatenation: `bootstrap/hello/bootstrap/hello`. This is the double-topic bug.
+
+> ❌ Wrong — P4 literal + P5 topic = double topic:
+> ```
+> MQTTPUB @MQTT_DEPT 0x11 5000 """bootstrap/hello/""" "3 0x10 ""bootstrap/hello"" SS1" ...
+> // publishes to: bootstrap/hello/bootstrap/hello  ❌
+> ```
+
+> ✅ Correct — use SS register as P4 prefix, short suffix in P5:
+> ```
+> // SS9 = "bootstrap/" built at first scan via STRPRINT
+> MQTTPUB @MQTT_DEPT 0x11 5000 SS9 "3 0x10 ""hello"" SS1" ...
+> // publishes to: bootstrap/hello  ✅
+> ```
+
+**Pattern for all fixed-path topics:** build the base path in an SS register at first scan, use SS-register prefix mode for all publishes. Never mix a literal P4 with a topic in P5.
 
 ---
 
@@ -357,9 +376,6 @@ NETTIME @IntEthernet 184156782 123 5000 C_NtpOK C_NtpErr
 
 ### MQTTPUB ✅
 Publish a message to an MQTT broker (terminates rung).
-```
-MQTTPUB @MQTT_DEPT 0x11 5000 """bootstrap/hello/""" "3 0x10 ""bootstrap/hello"" SS1" 0x0 C12 C13 DST511
-```
 
 **Parameters:**
 | # | Value | Notes |
@@ -367,8 +383,8 @@ MQTTPUB @MQTT_DEPT 0x11 5000 """bootstrap/hello/""" "3 0x10 ""bootstrap/hello"" 
 | P1 | `@MQTT_DEPT` | MQTT device reference |
 | P2 | `0x11` | **Must be `0x11`, not `0x1`** |
 | P3 | `5000` | Timeout in ms |
-| P4 | `"""topic"""` or SS register | Inline literal topic, OR SS register used as topic prefix |
-| P5 | `"count flags item1 item2"` | Payload table — see below |
+| P4 | SS register | Topic prefix — **always use SS register, never literal** (see Rule 6) |
+| P5 | `"count flags topic payload"` | Payload table |
 | P6 | `0x0` | |
 | P7 | C bit | Publish-OK bit |
 | P8 | C bit | Publish-fail bit |
@@ -380,29 +396,33 @@ MQTTPUB @MQTT_DEPT 0x11 5000 """bootstrap/hello/""" "3 0x10 ""bootstrap/hello"" 
 | `0x10` | No-retain, publish on change |
 | `0x11` | Retain, publish on change |
 
-**P4/P5 topic prefix mode** (when P4 is an SS register):
+**Correct SS-register prefix mode examples:**
 ```
-// SS0 = "Buildings/0000/" — suffix must NOT have a leading slash (see Rule 5)
+// SS0 = "Buildings/0000/"  → publishes to Buildings/0000/health/cpu_errors
 MQTTPUB @MQTT_DEPT 0x11 5000 SS0 "3 0x10 ""health/cpu_errors"" ST10" 0x0 C12 C13 DST511
-// → publishes to: Buildings/0000/health/cpu_errors  ✅
+
+// SS9 = "bootstrap/"  → publishes to bootstrap/hello
+MQTTPUB @MQTT_DEPT 0x11 5000 SS9 "3 0x10 ""hello"" SS1" 0x0 C12 C13 DST511
 ```
 
 ### MQTTSUB ✅
 Subscribe to an MQTT topic (terminates rung).
-```
-MQTTSUB @MQTT_DEPT 0x10 """bootstrap/provision""" "3 0x10 ""bootstrap/provision"" SL0" C23 C13 DST511
-```
 
 **Parameters:**
 | # | Value | Notes |
 |---|---|---|
 | P1 | `@MQTT_DEPT` | MQTT device reference |
 | P2 | `0x10` | |
-| P3 | Topic | Inline literal or SS register |
+| P3 | SS register | Topic prefix — **always use SS register, never literal** (see Rule 6) |
 | P4 | `"count flags topic destination"` | Topic inside P4 uses doubled-quote escaping |
 | P5 | C bit | Subscribe-OK bit |
 | P6 | C bit | Error bit |
 | P7 | `DST511` | Status register |
+
+```
+// SS9 = "bootstrap/"  → subscribes to bootstrap/provision
+MQTTSUB @MQTT_DEPT 0x10 SS9 "3 0x10 ""provision"" SL0" C23 C13 DST511
+```
 
 > ⚠️ Do-More `MQTTSUB` does **not** support wildcard topics. All subscriptions must use static topic strings.
 
@@ -421,24 +441,25 @@ MQTTSUB @MQTT_DEPT 0x10 """bootstrap/provision""" "3 0x10 ""bootstrap/provision"
 ### STRPRINT ✅
 Format a string into a destination SS register (terminates rung).
 ```
-STRPRINT SS1 0x4 """mac="" SerialNum "";ip="" D2040 "";"""
-STRPRINT SS2 0x4 "FmtInt(D2040, ipaddr)"
-STRPRINT SS2 0x4 "FmtBit(X0, val)"
+STRPRINT SS1 0x4 """mac="" SerialNum "";ip="" FmtInt(DST18, ipaddr) "";"""
+STRPRINT SS9 0x4 """bootstrap/"""
 ```
 - P2: `0x4` (format flags)
-- `FmtInt(reg, ipaddr)` — formats a DWORD as dotted-decimal IP string
+- `FmtInt(reg, ipaddr)` — formats a DWORD as dotted-decimal IP string ✅
 - `FmtBit(bit, val)` — formats a bit as `0` or `1`
 - ❌ Cannot mix STRPRINT and DUPBOOL in the same rung
-- When building topic strings with SS0 prefix, suffix must NOT have a leading slash (see Rule 5)
+- When building topic strings used as SS prefix, include trailing slash: `"bootstrap/"` not `"bootstrap"`
 
 ### STRFIND ✅
 Search for a substring within a string. **Requires exactly 6 parameters.**
+**P6 (find-text) accepts an SS register as well as a string literal.** ✅
 
 > ⚠️ **Parameter order:** find-text is the **last** (P6) parameter, NOT P5.
 
 ```
 MOVE 0 D2000
-STRFIND SL0 0x0 D2000 C25 C26 """mac="""
+STRFIND SL0 0x0 D2000 C25 C26 """mac="""    // literal find-text
+STRFIND SL0 0x0 D2000 C25 C26 SS8           // SS register find-text ✅
 ```
 
 **Parameters:**
@@ -446,25 +467,41 @@ STRFIND SL0 0x0 D2000 C25 C26 """mac="""
 |---|---|---|
 | P1 | Source string | SL or SS register |
 | P2 | `0x0` | Direction — **must be hex (`0x0`), not decimal (`0`)** |
-| P3 | `D2000` | In/out offset register — **must be a user D or V register**. DST registers and inline constants are invalid. |
+| P3 | `D2000` | In/out offset register — **must be a user D or V register** |
 | P4 | C bit | Set-if-**found** bit |
-| P5 | C bit | Set-if-**not**-found bit — **must be a C bit, not a string** |
-| P6 | `"""mac="""` | Find text — **string literal (last parameter)** |
-
-> ❌ `STRFIND SL0 0x0 D2000 C25 """mac="""` C26 — wrong order, causes "P5 Set if NOT found: Parameter 5 should not be a string"
+| P5 | C bit | Set-if-**not**-found bit |
+| P6 | String literal or SS register | Find text — **last parameter** |
 
 - Pre-zero the offset register before calling: `MOVE 0 D2000`
 - ❌ DST registers in P3 are treated as constants — do not use
-- ❌ Omitting P5 or P6 produces import error
+
+### STRSUB ✅
+Extract a substring from a source string into a destination SS register.
+
+```
+MOVE 22 D2001
+STRSUB SL0 D2001 0x0 32 SS0
+// Extracts 32 chars from SL0 starting at offset D2001 into SS0
+```
+
+**Parameters:**
+| # | Value | Notes |
+|---|---|---|
+| P1 | Source string | SL or SS register |
+| P2 | D register | Start offset — **must be a D register**, not a constant |
+| P3 | `0x0` | Direction |
+| P4 | Count | Number of characters to extract |
+| P5 | Destination | SS register |
+
+> Note: previously marked ⚠️ — confirmed working in text import with D register offset (v2.25, 2026-03-14).
 
 ### STRCOPY ✅
 Copy characters from one string to another (terminates rung).
 ```
 STRCOPY SL0 SS0 64
 ```
-- P1: Source string
-- P2: Destination — **must be an SS register** (❌ D registers invalid)
-- P3: Character count
+- Copies from **start of source** — no offset parameter
+- P2: Destination must be SS register (❌ D registers invalid)
 
 ### STRCLEAR ✅
 Clear a string register (terminates rung).
@@ -473,18 +510,13 @@ STRCLEAR SL0 1
 ```
 - P2: Count is **required** — ❌ `STRCLEAR SL0` (1 param) is invalid
 
-### STRSUB ⚠️
-Extract a substring. Not yet fully confirmed in text import.
-```
-STRSUB SL0 D2001 0x0 64 SS0
-```
-
 ### String Register Types
 | Type | Description |
 |---|---|
-| `SS0`–`SS127` | Short string registers |
-| `SL0`–`SLn` | Long string registers — used as MQTTSUB receive buffers |
+| `SS0`–`SS127` | Short string registers (64 chars each) |
+| `SL0`–`SLn` | Long string registers (256 chars) — used as MQTTSUB receive buffers |
 | `SL0.length` ✅ | Valid field — use to check if buffer has data (`ANDNE SL0.length 0`) |
+| `SS0.length` ✅ | Valid field — same pattern works on SS registers |
 | `SL0.New` ❌ | Not valid in text import |
 
 ---
@@ -524,6 +556,7 @@ Source: BRX User Manual, 4th Edition, Appendix D (confirmed from official manual
 ### CPU Health Status Bits (ST bits — usable as contacts)
 | Bit | Nickname | Description |
 |---|---|---|
+| `ST0` | `$FirstScan` | ON for first scan after STOP→RUN — use for initialization rungs |
 | `ST1` | `$On` | Always ON — use as unconditional rung enable |
 | `ST10` | `$HasErrors` | Any runtime error active |
 | `ST11` | `$HasWarnings` | Any runtime warning active |
@@ -534,7 +567,7 @@ Source: BRX User Manual, 4th Edition, Appendix D (confirmed from official manual
 | `ST148` | `$CriticalIOError` | Permanent I/O shutdown — power cycle required |
 | `ST149` | `$BatteryLow` | Battery below minimum threshold |
 
-> **Important — per-slot status:** There are NO per-slot DST registers for individual expansion module presence, type, or fault. Module health is reported as aggregate system bits only (`ST14`, `ST134`, `ST148`). Per-slot detail is not accessible via ladder logic DST registers.
+> **Important — per-slot status:** There are NO per-slot DST registers for individual expansion module presence, type, or fault. Module health is reported as aggregate system bits only.
 
 ### Clock / Time Bits
 | Bit | Nickname | Description |
@@ -578,7 +611,7 @@ MOVE DST18 D1000       // load active IP
 | `FINDSTR` | Wrong name — use `STRFIND` |
 | `COMPSTR` | Wrong name — use `STRCMP` (⚠️ unconfirmed) |
 | `COPYSTRX` | Wrong name — use `STRCOPY` |
-| `STRGET` | Wrong name — use `STRSUB` (⚠️ unconfirmed in text import) |
+| `STRGET` | Wrong name — use `STRSUB` |
 | `STRSHIFT` | Does not exist |
 | `ADDD` | Does not exist as a standalone text import instruction |
 | `ENATASK` / `DISTASK` | Valid but unnecessary when using `RUN` from `$Main` |
