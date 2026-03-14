@@ -82,6 +82,56 @@ If a rung needs to both format a string and branch with DUPBOOL, split them:
 > MQTTPUB @MQTT_CORP ...
 > ```
 
+### Rule 4: SET/RST and DUPBOOL/POPBOOL cannot coexist in the same rung ✅
+
+`SET` and `RST` terminate a rung just like other output instructions. `DUPBOOL` cannot follow them. If you need to both latch a bit and publish based on its new state, use two rungs — the second rung reads the now-updated latch bit as a condition.
+
+> ❌ Illegal — SET followed by DUPBOOL:
+> ```
+> STRE V1010 2
+> AND ST10
+> ANDN C40
+> SET C40         ← SET terminates rung
+> DUPBOOL         ← illegal, new rung needed
+> ...
+> ```
+
+> ✅ Correct — split into latch rung + publish rung:
+> ```
+> // Rung A: update latch
+> STRE V1010 2
+> AND ST10
+> ANDN C40
+> SET C40
+>
+> // Rung B: publish (latch is now SET, use it as AND condition)
+> STRE V1010 2
+> AND ST10
+> AND C40
+> DUPBOOL
+> ANDE V1001 1
+> MQTTPUB @MQTT_DEPT ...
+> POPBOOL
+> ANDE V1001 2
+> MQTTPUB @MQTT_CORP ...
+> ```
+
+> For the falling edge (RST case), the publish rung uses `ANDN C40` since the latch has just been cleared:
+> ```
+> // Rung A: update latch
+> STRE V1010 2
+> ANDN ST10
+> AND C40
+> RST C40
+>
+> // Rung B: publish (latch is now RST, use it as ANDN condition)
+> STRE V1010 2
+> ANDN ST10
+> ANDN C40
+> DUPBOOL
+> ...
+> ```
+
 ---
 
 ## Program / Task Structure
@@ -231,7 +281,8 @@ POPBOOL
 ANDE V1001 2
 PING @IntEthernet 0x1 168792078 500 DST511 0x0 C1 C2
 ```
-> ❌ Cannot mix STRPRINT and DUPBOOL in the same rung — put STRPRINT in its own preceding rung.
+> ❌ Cannot mix STRPRINT and DUPBOOL in the same rung — put STRPRINT in its own preceding rung.  
+> ❌ Cannot mix SET/RST and DUPBOOL in the same rung — see Rule 4 above.
 
 ---
 
