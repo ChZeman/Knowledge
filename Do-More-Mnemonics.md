@@ -132,6 +132,24 @@ If a rung needs to both format a string and branch with DUPBOOL, split them:
 > ...
 > ```
 
+### Rule 5: MQTTPUB SS0 prefix-mode topic suffixes must NOT have a leading slash ✅
+
+When P4 is an SS register (prefix mode), SS0 already ends with `/` from the provision payload (e.g. `Buildings/0000/`). A leading slash on the suffix produces an absolute topic that ignores SS0 entirely, routing to the wrong place on the broker.
+
+> ❌ Wrong — leading slash makes topic absolute, ignores SS0:
+> ```
+> MQTTPUB @MQTT_DEPT 0x11 5000 SS0 "3 0x10 ""/health/cpu_errors"" ST10" ...
+> // publishes to: /health/cpu_errors  (NOT Buildings/0000/health/cpu_errors)
+> ```
+
+> ✅ Correct — no leading slash, SS0 prefix concatenates cleanly:
+> ```
+> MQTTPUB @MQTT_DEPT 0x11 5000 SS0 "3 0x10 ""health/cpu_errors"" ST10" ...
+> // publishes to: Buildings/0000/health/cpu_errors  ✅
+> ```
+
+This applies to all SS0 prefix-mode topic suffixes — MQTTPUB and STRPRINT alike.
+
 ---
 
 ## Program / Task Structure
@@ -364,7 +382,9 @@ MQTTPUB @MQTT_DEPT 0x11 5000 """bootstrap/hello/""" "3 0x10 ""bootstrap/hello"" 
 
 **P4/P5 topic prefix mode** (when P4 is an SS register):
 ```
-MQTTPUB @MQTT_DEPT 0x11 5000 SS0 "3 0x11 ""/identity/mac"" SS2" 0x0 C12 C13 DST511
+// SS0 = "Buildings/0000/" — suffix must NOT have a leading slash (see Rule 5)
+MQTTPUB @MQTT_DEPT 0x11 5000 SS0 "3 0x10 ""health/cpu_errors"" ST10" 0x0 C12 C13 DST511
+// → publishes to: Buildings/0000/health/cpu_errors  ✅
 ```
 
 ### MQTTSUB ✅
@@ -409,6 +429,7 @@ STRPRINT SS2 0x4 "FmtBit(X0, val)"
 - `FmtInt(reg, ipaddr)` — formats a DWORD as dotted-decimal IP string
 - `FmtBit(bit, val)` — formats a bit as `0` or `1`
 - ❌ Cannot mix STRPRINT and DUPBOOL in the same rung
+- When building topic strings with SS0 prefix, suffix must NOT have a leading slash (see Rule 5)
 
 ### STRFIND ✅
 Search for a substring within a string. **Requires exactly 6 parameters.**
