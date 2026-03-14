@@ -169,6 +169,42 @@ When P4 is a fixed string literal (e.g. `"""bootstrap/hello/"""`) AND P5 also co
 
 **Pattern for all fixed-path topics:** build the base path in an SS register at first scan, use SS-register prefix mode for all publishes. Never mix a literal P4 with a topic in P5.
 
+### Rule 7: MQTTSUB P3 must be an SS register — blank and slash-containing literals are invalid ✅
+
+MQTTSUB P3 must be an SS or SL register. Blank `""` is invalid. String literals containing `/` are invalid (importer rejects them). Only SS/SL register references are accepted.
+
+> ❌ Both of these are rejected by the importer:
+> ```
+> MQTTSUB @MQTT_DEPT 0x10 "" ...           ← blank P3 invalid
+> MQTTSUB @MQTT_DEPT 0x10 "bootstrap/provision" ...  ← slash in literal invalid
+> ```
+
+### Rule 8: MQTTSUB P3 is the COMPLETE subscription topic — NOT a prefix ✅ (confirmed v2.33)
+
+**This is the critical difference between MQTTPUB and MQTTSUB:**
+
+| Instruction | P3/P4 role |
+|---|---|
+| MQTTPUB | P4 = SS register prefix; P5 = payload table with topic suffix appended to P4 |
+| MQTTSUB | P3 = **complete topic** (SS register containing full path); P4 = payload table only (no topic suffix) |
+
+For MQTTSUB, whatever is in P3 IS the subscription topic. The "topic" field inside P4 is ignored for routing — P4 contains only the payload destination. This was confirmed by MQTT Explorer showing the PLC subscribed to `bootstrap/` (SS9 value) only, never receiving messages on `bootstrap/provision`.
+
+> ❌ Wrong — SS9 = `bootstrap/`, P4 topic suffix `"provision"` is ignored on broker:
+> ```
+> MQTTSUB @MQTT_DEPT 0x10 SS9 "3 0x10 ""provision"" SL0" C23 C13 DST511
+> // Actually subscribes to: bootstrap/  ❌ — never receives bootstrap/provision
+> ```
+
+> ✅ Correct — SS10 = `bootstrap/provision` (full topic), P4 = destination only:
+> ```
+> // SS10 built at first scan: STRPRINT SS10 0x4 """bootstrap/provision"""
+> MQTTSUB @MQTT_DEPT 0x10 SS10 "1 0x10 SL0" C23 C13 DST511
+> // Subscribes to: bootstrap/provision  ✅
+> ```
+
+**Pattern:** For each MQTTSUB, build a dedicated SS register containing the **full topic path** at first scan. Use that register as P3. P4 contains only the count, flags, and destination register.
+
 ---
 
 ## Program / Task Structure
@@ -384,7 +420,7 @@ Publish a message to an MQTT broker (terminates rung).
 | P2 | `0x11` | **Must be `0x11`, not `0x1`** |
 | P3 | `5000` | Timeout in ms |
 | P4 | SS register | Topic prefix — **always use SS register, never literal** (see Rule 6) |
-| P5 | `"count flags topic payload"` | Payload table |
+| P5 | `"count flags topic payload"` | Payload table including topic suffix |
 | P6 | `0x0` | |
 | P7 | C bit | Publish-OK bit |
 | P8 | C bit | Publish-fail bit |
@@ -408,21 +444,35 @@ MQTTPUB @MQTT_DEPT 0x11 5000 SS9 "3 0x10 ""hello"" SS1" 0x0 C12 C13 DST511
 ### MQTTSUB ✅
 Subscribe to an MQTT topic (terminates rung).
 
+**⚠️ MQTTSUB behaves differently from MQTTPUB — read Rule 8 carefully.**
+
 **Parameters:**
 | # | Value | Notes |
 |---|---|---|
 | P1 | `@MQTT_DEPT` | MQTT device reference |
 | P2 | `0x10` | |
-| P3 | SS register | Topic prefix — **always use SS register, never literal** (see Rule 6) |
-| P4 | `"count flags topic destination"` | Topic inside P4 uses doubled-quote escaping |
+| P3 | SS register | **Complete subscription topic** — full path, no suffix appended from P4 |
+| P4 | `"count flags destination"` | Payload destination table — **no topic field**, topic is entirely in P3 |
 | P5 | C bit | Subscribe-OK bit |
 | P6 | C bit | Error bit |
 | P7 | `DST511` | Status register |
 
-```
-// SS9 = "bootstrap/"  → subscribes to bootstrap/provision
-MQTTSUB @MQTT_DEPT 0x10 SS9 "3 0x10 ""provision"" SL0" C23 C13 DST511
-```
+> ✅ Correct — SS10 contains full topic `bootstrap/provision`:
+> ```
+> // At first scan:
+> STR ST1
+> STRPRINT SS10 0x4 """bootstrap/provision"""
+>
+> // Subscription rung:
+> MQTTSUB @MQTT_DEPT 0x10 SS10 "1 0x10 SL0" C23 C13 DST511
+> // Subscribes to: bootstrap/provision  ✅
+> ```
+
+> ❌ Wrong — SS9 = `bootstrap/`, broker only sees `bootstrap/`:
+> ```
+> MQTTSUB @MQTT_DEPT 0x10 SS9 "3 0x10 ""provision"" SL0" C23 C13 DST511
+> // Subscribes to: bootstrap/  ❌  (provision suffix in P4 is ignored)
+> ```
 
 > ⚠️ Do-More `MQTTSUB` does **not** support wildcard topics. All subscriptions must use static topic strings.
 
@@ -443,12 +493,14 @@ Format a string into a destination SS register (terminates rung).
 ```
 STRPRINT SS1 0x4 """mac="" SerialNum "";ip="" FmtInt(DST18, ipaddr) "";"""
 STRPRINT SS9 0x4 """bootstrap/"""
+STRPRINT SS10 0x4 """bootstrap/provision"""
 ```
 - P2: `0x4` (format flags)
 - `FmtInt(reg, ipaddr)` — formats a DWORD as dotted-decimal IP string ✅
 - `FmtBit(bit, val)` — formats a bit as `0` or `1`
 - ❌ Cannot mix STRPRINT and DUPBOOL in the same rung
-- When building topic strings used as SS prefix, include trailing slash: `"bootstrap/"` not `"bootstrap"`
+- When building topic strings used as MQTTPUB SS prefix, include trailing slash: `"bootstrap/"` not `"bootstrap"`
+- When building topic strings for MQTTSUB P3, include full path: `"bootstrap/provision"` not `"bootstrap/"`
 
 ### STRFIND ✅
 Search for a substring within a string. **Requires exactly 6 parameters.**
