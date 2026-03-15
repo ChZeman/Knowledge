@@ -159,6 +159,15 @@ The P4 topic field accepts an SS register name as the topic value — same patte
 
 > ⚠️ **Build SS registers at ST0, not ST1**, to guarantee they are populated before MQTTSUB fires on first scan. If built at ST1, the register may be empty when MQTTSUB executes on the same scan, resulting in a wrong subscription topic.
 
+### Rule 11: MQTTSUB does NOT support wildcards ✅ (confirmed from official docs)
+
+MQTTSUB does not support `+` or `#` wildcard characters in topics. All subscription topics must be listed explicitly, one entry per topic.
+
+**MQTTSUB capacity (from official docs):**
+- Up to **50 subscriptions per MQTTSUB instruction**
+- Up to **100 topics per MQTT Client device**, spread across a maximum of **10 active MQTTSUB instructions**
+- To subscribe to more than 100 topics, create multiple MQTT Client devices pointing to the same broker
+
 ---
 
 ## Program / Task Structure
@@ -267,8 +276,11 @@ SNTP client — text import syntax unconfirmed.
 
 **Suspected syntax:**
 ```
-NETTIME @IntEthernet 184156782 123 5000 C_NtpOK C_NtpErr
+NETTIME @IntEthernet <ip-dword> 123 5000 C_NtpOK C_NtpErr
 ```
+
+> ⚠️ **Must confirm whether NETTIME accepts a V register as the IP parameter.** The design calls for NTP IPs to be received via MQTT as strings, converted to DWORDs via STR2INT into V1020/V1021, then passed to NETTIME. If NETTIME only accepts a constant DWORD, an alternative approach is needed.
+
 > ❌ Do NOT use held-ON condition — NETTIME is edge-triggered.
 
 ---
@@ -313,6 +325,8 @@ MQTTPUB @MQTT_DEPT 0x11 5000 SS9 "3 0x10 ""hello"" SS1" 0x0 C12 C13 DST511
 | P6 | C bit | Error bit |
 | P7 | `DST511` | Status register |
 
+**Capacity:** 50 subscriptions per instruction, 100 topics per MQTT Client device (max 10 instructions). No wildcard support.
+
 > ✅ **Confirmed pattern — dynamic per-PLC topic using SS register in P4 topic field:**
 > ```
 > // ST0 rungs (guaranteed before MQTTSUB fires):
@@ -329,7 +343,7 @@ MQTTPUB @MQTT_DEPT 0x11 5000 SS9 "3 0x10 ""hello"" SS1" 0x0 C12 C13 DST511
 
 > ⚠️ Build all SS registers used in MQTTSUB at **ST0** (first scan), not ST1. If built at ST1, the register may be empty when MQTTSUB fires on the same scan.
 
-> ⚠️ Do-More MQTTSUB does **not** support wildcard topics.
+> ✅ MQTTSUB does **not** support wildcard topics (+ or #). All topics must be listed explicitly.
 
 ### MQTT Device Definition ✅
 ```
@@ -391,6 +405,16 @@ STRSUB SL0 D2000 0x0 32 SS0
 STRCOPY SL0 SS0 64    // copies from start, no offset
 STRCLEAR SL0 1        // count required
 ```
+
+### STR2INT ✅ (confirmed from official docs)
+Converts a string to an integer value. Used to convert dotted-decimal IP strings received via MQTT into DWORD values for use with NETTIME and other network instructions.
+
+```
+STR2INT SS5 V1020    // converts "10.250.2.110" → DWORD in V1020
+STR2INT SS6 V1021    // converts "10.250.2.210" → DWORD in V1021
+```
+
+> ⚠️ Confirm text import syntax. The conversion of a dotted-decimal IP string to a network DWORD may require `FmtInt` or a specific format flag — needs testing.
 
 ### String Register Types
 | Type | Description |
