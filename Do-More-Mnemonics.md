@@ -164,16 +164,25 @@ MQTTSUB does not support `+` or `#` wildcard characters in topics. All subscript
 - Up to **100 topics per MQTT Client device**, spread across a maximum of **10 active MQTTSUB instructions**
 - To subscribe to more than 100 topics, create multiple MQTT Client devices pointing to the same broker
 
-### Rule 12: MQTTSUB P4 subscription flag is 0x0, NOT 0x10 ✅ (confirmed v2.41)
+### Rule 12: MQTTSUB P4 leading number = fields per entry (always 3), NOT topic count ✅ (confirmed v2.42)
 
-The per-entry flag in the MQTTSUB P4 table is `0x0` for subscriptions. Using `0x10` (the MQTTPUB retain flag) causes internal parser errors ("aRow.GetCount() returned bad value"). C-bit destinations are valid in MQTTSUB P4 table entries.
+The leading integer in the MQTTSUB P4 string is **3** — the number of fields per subscription entry (flag + topic + destination). It is always `3` regardless of how many topics are listed. Setting it to the number of subscriptions causes internal parser errors.
 
-> ✅ Correct MQTTSUB multi-topic P4 entry format:
+**P4 per-entry flag is `0x0`** for subscriptions. Using `0x10` (the MQTTPUB retain flag) causes "aRow.GetCount() returned bad value" errors.
+
+**C-bit destinations** are valid in MQTTSUB P4 entries. Received payload is stored directly to the bit.
+
+> ✅ Correct multi-topic P4 format (confirmed v2.42):
 > ```
-> // Flag 0x0 = subscribe
-> "3 0x0 ""topic/suffix"" C50 0x0 ""other/topic"" C51 ..."
+> // "3" = fields per entry (always 3, regardless of topic count)
+> // 0x0 = per-entry subscription flag
+> MQTTSUB @MQTT_DEPT 0x0 SS0 "3 0x0 ""config/ntp/primary"" SS5 0x0 ""config/ntp/secondary"" SS6 0x0 ""config/lighting/area/carousel-plaza"" C50" C43 C13 DST511
 > ```
-> ❌ Do NOT use `0x10` in MQTTSUB P4 — that flag is for MQTTPUB retain.
+
+> ❌ Wrong — using topic count as leading number:
+> ```
+> MQTTSUB @MQTT_DEPT 0x0 SS0 "22 0x0 ..." ← causes parser errors
+> ```
 
 ---
 
@@ -299,7 +308,7 @@ NETTIME @IntEthernet D1020 123 5000 0x0 C45 C46
 > ❌ Do NOT use held-ON condition — NETTIME is edge-triggered.
 > ❌ `NETTIME @IntEthernet 184156782 ...` — inline DWORD constant not accepted.
 > ❌ `NETTIME @IntEthernet V1020 ...` — V register not accepted.
-> ❌ `NETTIME @IntEthernet D1020 123 5000 C45 C46` — missing `0x0` flags word, causes "too few parameters" error.
+> ❌ `NETTIME @IntEthernet D1020 123 5000 C45 C46` — missing `0x0` flags word causes "too few parameters" error.
 
 ---
 
@@ -336,29 +345,31 @@ MQTTPUB @MQTT_DEPT 0x11 5000 SS9 "3 0x10 ""hello"" SS1" 0x0 C12 C13 DST511
 | # | Value | Notes |
 |---|---|---|
 | P1 | `@MQTT_DEPT` | MQTT device reference |
-| P2 | `0x10` | |
+| P2 | `0x10` or `0x0` | Instruction-level flag |
 | P3 | SS register | Topic prefix (must end with `/` if suffix follows) |
-| P4 | `"count flags topic destination"` | Per-entry flag must be `0x0` (not `0x10`) |
+| P4 | `"3 flags topic destination ..."` | **Leading 3 = fields per entry**, always 3 |
 | P5 | C bit | Subscribe-OK bit |
 | P6 | C bit | Error bit |
 | P7 | `DST511` | Status register |
 
+**P4 format — critical rules:**
+- Leading `3` = number of fields per entry (flag + topic + destination). **Always 3.** Never the number of topics.
+- Per-entry flag = `0x0` for subscriptions. Using `0x10` causes internal parser errors.
+- C-bit destinations valid. SS/SL register destinations valid.
+- Entries repeat: `0x0 ""suffix"" dest 0x0 ""suffix"" dest ...`
+
 **Capacity:** 50 subscriptions per instruction, 100 topics per MQTT Client device (max 10 instructions). No wildcard support.
 
-**P4 entry flag:** `0x0` for all subscription entries. Using `0x10` causes internal parser errors.
-
-**C-bit destinations:** Confirmed valid in MQTTSUB P4 table entries. Received "1"/"0" payload is stored to the bit.
-
-> ✅ **Single-topic pattern (confirmed v2.37):**
+> ✅ **Single-topic (confirmed v2.37):**
 > ```
 > MQTTSUB @MQTT_DEPT 0x10 SS8 "3 0x10 SS10 SL0" C23 C13 DST511
 > ```
-> Note: The outer P4 uses `0x10` as the MQTTSUB instruction flag (P2 of the outer instruction).
-> The per-entry flags inside the P4 string are `0x0`.
+> Note: In this confirmed-working single-topic case, P2=`0x10` and per-entry flag=`0x10`.
+> The multi-topic confirmed case uses P2=`0x0` and per-entry flag=`0x0`.
 
-> ✅ **Multi-topic pattern (confirmed v2.41):**
+> ✅ **Multi-topic (confirmed v2.42):**
 > ```
-> MQTTSUB @MQTT_DEPT 0x10 SS0 "3 0x0 ""config/ntp/primary"" SS5 0x0 ""config/ntp/secondary"" SS6 0x0 ""config/lighting/area/carousel-plaza"" C50" C43 C13 DST511
+> MQTTSUB @MQTT_DEPT 0x0 SS0 "3 0x0 ""config/ntp/primary"" SS5 0x0 ""config/ntp/secondary"" SS6 0x0 ""config/lighting/area/carousel-plaza"" C50" C43 C13 DST511
 > ```
 
 ### MQTT Device Definition ✅
@@ -439,7 +450,7 @@ STR2INT SS6 10 D1021 DST511    // "184156882" → DWORD 184156882 in D1021  (= 1
 
 > ✅ Works correctly for plain integer strings. Ignition publishes NTP IPs in this format.
 > ❌ Do NOT use dotted-decimal IP strings (e.g. `"10.250.2.110"`) — STR2INT treats them as a plain integer starting at `10`, producing the wrong value.
-> ❌ `STR2INT SS5 D1020` — missing base and status parameters, causes "too few parameters" error.
+> ❌ `STR2INT SS5 D1020` — missing base and status parameters causes "too few parameters" error.
 
 ### String Register Types
 | Type | Description |
