@@ -277,10 +277,10 @@ NETTIME @IntEthernet D1020 123 5000 C_NtpOK C_NtpErr
 
 **IP parameter:** Must be a **D register** containing the server IP as a DWORD. ✅ confirmed — V registers and inline constants are not accepted.
 
-The NTP IP is received via MQTT as a dotted-decimal string (e.g. `"10.250.2.110"`), converted to a DWORD via STR2INT, and stored in a D register (D1020 for primary, D1021 for secondary) before NETTIME is called.
+The NTP IP DWORD is received via MQTT as a plain integer string (e.g. `"184156782"`), converted via STR2INT into D1020 (primary) / D1021 (secondary). Ignition publishes the IP in this format — **not** as dotted-decimal — because STR2INT handles plain integers directly.
 
 > ❌ Do NOT use a held-ON condition — NETTIME is edge-triggered.
-> ❌ `NETTIME @IntEthernet 184156782 ...` — inline constant DWORD not accepted.
+> ❌ `NETTIME @IntEthernet 184156782 ...` — inline constant not accepted.
 > ❌ `NETTIME @IntEthernet V1020 ...` — V register not accepted.
 
 ---
@@ -399,15 +399,16 @@ STRCLEAR SL0 1
 ```
 
 ### STR2INT ⚠️
-Converts a string to an integer (DWORD). Used to convert dotted-decimal IP strings received via MQTT into DWORD values for storage in D registers, which are then passed to NETTIME.
+Converts a **plain integer string** to a DWORD integer value. Used to convert NTP IP DWORD strings received via MQTT into D registers for NETTIME.
 
 ```
 // Suspected syntax — text import syntax unconfirmed:
-STR2INT SS5 D1020    // converts "10.250.2.110" → DWORD in D1020
-STR2INT SS6 D1021    // converts "10.250.2.210" → DWORD in D1021
+STR2INT SS5 D1020    // "184156782" → DWORD 184156782 in D1020  (= 10.250.2.110)
+STR2INT SS6 D1021    // "184156882" → DWORD 184156882 in D1021  (= 10.250.2.210)
 ```
 
-> ⚠️ Text import syntax unconfirmed. Destination must be a D register (required by NETTIME). Confirm whether STR2INT interprets a dotted-decimal IP string as a network-order DWORD or as a plain integer.
+> ✅ Works correctly for plain integer strings. Ignition publishes NTP IPs in this format.
+> ❌ Do NOT use dotted-decimal IP strings (e.g. `"10.250.2.110"`) — STR2INT parses as a plain integer and would produce the wrong value. Ignition must publish the pre-computed DWORD integer string instead.
 
 ### String Register Types
 | Type | Description |
