@@ -166,23 +166,30 @@ MQTTSUB does not support `+` or `#` wildcard characters in topics. All subscript
 
 ### Rule 12: MQTTSUB P4 leading number = fields per entry (always 3), NOT topic count ✅ (confirmed v2.42)
 
-The leading integer in the MQTTSUB P4 string is **3** — the number of fields per subscription entry (flag + topic + destination). It is always `3` regardless of how many topics are listed. Setting it to the number of subscriptions causes internal parser errors.
+The leading integer in the MQTTSUB P4 string is **3** — the number of fields per subscription entry (flag + topic + destination). It is always `3` regardless of how many topics are listed.
 
-**P4 per-entry flag is `0x0`** for subscriptions. Using `0x10` (the MQTTPUB retain flag) causes "aRow.GetCount() returned bad value" errors.
+### Rule 13: MQTTSUB prefix mode requires P2=0x10 AND per-entry flags=0x10 ✅ (confirmed v2.43)
 
-**C-bit destinations** are valid in MQTTSUB P4 entries. Received payload is stored directly to the bit.
+**This is the most critical flag rule.** The `0x10` flag must appear in TWO places to enable prefix concatenation:
+- **P2 = `0x10`** (instruction-level prefix enable)
+- **Per-entry flag = `0x10`** (entry-level prefix enable)
 
-> ✅ Correct multi-topic P4 format (confirmed v2.42):
+Using `0x0` in either location disables prefix concatenation — the P3 SS register value is ignored and topics are subscribed as bare suffixes only.
+
+> ✅ **Prefix mode** (P3 value prepended to each topic suffix):
 > ```
-> // "3" = fields per entry (always 3, regardless of topic count)
-> // 0x0 = per-entry subscription flag
-> MQTTSUB @MQTT_DEPT 0x0 SS0 "3 0x0 ""config/ntp/primary"" SS5 0x0 ""config/ntp/secondary"" SS6 0x0 ""config/lighting/area/carousel-plaza"" C50" C43 C13 DST511
+> // SS0 = "Buildings/0000/"
+> // Full topics: Buildings/0000/config/ntp/primary, etc.
+> MQTTSUB @MQTT_DEPT 0x10 SS0 "3 0x10 ""config/ntp/primary"" SS5 0x10 ""config/ntp/secondary"" SS6" C43 C13 DST511
 > ```
 
-> ❌ Wrong — using topic count as leading number:
+> ✅ **No-prefix mode** (topics subscribed exactly as written, P3 ignored):
 > ```
-> MQTTSUB @MQTT_DEPT 0x0 SS0 "22 0x0 ..." ← causes parser errors
+> // Full topics: top_level/field/, top_level/field1/, etc.
+> MQTTSUB @test 0x0 SS0 "3 0x0 ""top_level/field/"" C10 0x0 ""top_level/field1/"" D1" C0 C1 DST511
 > ```
+
+> ❌ **Wrong — mixed flags:** Using `0x0` for P2 but `0x10` in per-entry flags (or vice versa) will not produce prefix concatenation.
 
 ---
 
@@ -345,31 +352,42 @@ MQTTPUB @MQTT_DEPT 0x11 5000 SS9 "3 0x10 ""hello"" SS1" 0x0 C12 C13 DST511
 | # | Value | Notes |
 |---|---|---|
 | P1 | `@MQTT_DEPT` | MQTT device reference |
-| P2 | `0x10` or `0x0` | Instruction-level flag |
-| P3 | SS register | Topic prefix (must end with `/` if suffix follows) |
-| P4 | `"3 flags topic destination ..."` | **Leading 3 = fields per entry**, always 3 |
+| P2 | `0x10` (prefix) or `0x0` (no-prefix) | **Must match per-entry flags** |
+| P3 | SS register | Topic prefix register |
+| P4 | `"3 flags suffix dest ..."` | Leading `3` = fields/entry, always 3 |
 | P5 | C bit | Subscribe-OK bit |
 | P6 | C bit | Error bit |
 | P7 | `DST511` | Status register |
 
-**P4 format — critical rules:**
-- Leading `3` = number of fields per entry (flag + topic + destination). **Always 3.** Never the number of topics.
-- Per-entry flag = `0x0` for subscriptions. Using `0x10` causes internal parser errors.
-- C-bit destinations valid. SS/SL register destinations valid.
-- Entries repeat: `0x0 ""suffix"" dest 0x0 ""suffix"" dest ...`
+**The prefix flag rule — both locations must match:**
+
+| Mode | P2 | Per-entry flag | Effect |
+|---|---|---|---|
+| **Prefix** | `0x10` | `0x10` | P3 value prepended to each topic suffix ✅ |
+| **No-prefix** | `0x0` | `0x0` | Topics subscribed exactly as written; P3 ignored ✅ |
+| **Mixed** | `0x10` | `0x0` | ❌ Undefined / wrong behavior |
+| **Mixed** | `0x0` | `0x10` | ❌ Undefined / wrong behavior |
+
+**C-bit and SS register destinations** are both valid in P4 entries.
 
 **Capacity:** 50 subscriptions per instruction, 100 topics per MQTT Client device (max 10 instructions). No wildcard support.
 
-> ✅ **Single-topic (confirmed v2.37):**
+> ✅ **Prefix mode, multi-topic (confirmed v2.43):**
 > ```
+> // SS0 = "Buildings/0000/" → subscribes to Buildings/0000/config/ntp/primary, etc.
+> MQTTSUB @MQTT_DEPT 0x10 SS0 "3 0x10 ""config/ntp/primary"" SS5 0x10 ""config/ntp/secondary"" SS6 0x10 ""config/lighting/area/carousel-plaza"" C50" C43 C13 DST511
+> ```
+
+> ✅ **Prefix mode, single-topic with SS register as topic (confirmed v2.37):**
+> ```
+> // SS8 = "bootstrap/provision/" → subscribes to bootstrap/provision/<MAC>
 > MQTTSUB @MQTT_DEPT 0x10 SS8 "3 0x10 SS10 SL0" C23 C13 DST511
 > ```
-> Note: In this confirmed-working single-topic case, P2=`0x10` and per-entry flag=`0x10`.
-> The multi-topic confirmed case uses P2=`0x0` and per-entry flag=`0x0`.
 
-> ✅ **Multi-topic (confirmed v2.42):**
+> ✅ **No-prefix mode, multi-topic (confirmed v2.42):**
 > ```
-> MQTTSUB @MQTT_DEPT 0x0 SS0 "3 0x0 ""config/ntp/primary"" SS5 0x0 ""config/ntp/secondary"" SS6 0x0 ""config/lighting/area/carousel-plaza"" C50" C43 C13 DST511
+> // Topics subscribed exactly as written — P3 not prepended
+> MQTTSUB @test 0x0 SS0 "3 0x0 ""top_level/field/"" C10 0x0 ""top_level/field1/"" D1" C0 C1 DST511
 > ```
 
 ### MQTT Device Definition ✅
