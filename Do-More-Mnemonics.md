@@ -35,7 +35,7 @@ These rules were confirmed by iterative import testing. Violating them produces 
 | `ANDNE SL0.length 0` | `STRNE SL0.length 0` |
 | `ANDN C32` | `STRN C32` |
 | `ANDN T3.Done` | `STRN T3.Done` |
-| `ANDNE V1021 0` | `STRNE V1021 0` |
+| `ANDNE D1020 0` | `STRNE D1020 0` |
 
 ### Rule 2: Output instructions terminate a rung
 
@@ -133,9 +133,6 @@ MQTTSUB P3 must be an SS or SL register. Blank `""` is invalid. String literals 
 
 **MQTTSUB P3 and P4 topic field concatenate to form the full subscription topic** — exactly like MQTTPUB P4+P5.
 
-> ❌ Previously believed P3 was the complete topic and P4 was ignored. This was WRONG.
-> The confusion arose because SS9 = `bootstrap/` was empty when MQTTSUB first fired (built on ST1, not ST0), so the subscription landed on `bootstrap/` with no suffix.
-
 > ✅ Correct understanding:
 > - P3 = SS register containing the **prefix** (must end with `/` if a suffix follows)
 > - P4 topic field = suffix appended to P3
@@ -147,17 +144,16 @@ The importer validates that the P4 topic field is non-empty. Empty string `""` i
 
 ### Rule 10: MQTTSUB P4 topic field accepts SS register name ✅ (confirmed v2.37)
 
-The P4 topic field accepts an SS register name as the topic value — same pattern as MQTTPUB P5 payload items. This allows dynamic topics built from SerialNum or other runtime values.
+The P4 topic field accepts an SS register name as the topic value — same pattern as MQTTPUB P5 payload items.
 
 > ✅ Confirmed working pattern for dynamic per-PLC subscription topic:
 > ```
 > // SS8  = "bootstrap/provision/"  built at ST0
 > // SS10 = SerialNum MAC string    built at ST0 via STRPRINT SS10 0x4 "SerialNum"
-> // Full topic = "bootstrap/provision/" + "00:E0:62:30:9F:13" = "bootstrap/provision/00:E0:62:30:9F:13"
 > MQTTSUB @MQTT_DEPT 0x10 SS8 "3 0x10 SS10 SL0" C23 C13 DST511
 > ```
 
-> ⚠️ **Build SS registers at ST0, not ST1**, to guarantee they are populated before MQTTSUB fires on first scan. If built at ST1, the register may be empty when MQTTSUB executes on the same scan, resulting in a wrong subscription topic.
+> ⚠️ **Build SS registers at ST0, not ST1**, to guarantee they are populated before MQTTSUB fires on first scan.
 
 ### Rule 11: MQTTSUB does NOT support wildcards ✅ (confirmed from official docs)
 
@@ -276,12 +272,16 @@ SNTP client — text import syntax unconfirmed.
 
 **Suspected syntax:**
 ```
-NETTIME @IntEthernet <ip-dword> 123 5000 C_NtpOK C_NtpErr
+NETTIME @IntEthernet D1020 123 5000 C_NtpOK C_NtpErr
 ```
 
-> ⚠️ **Must confirm whether NETTIME accepts a V register as the IP parameter.** The design calls for NTP IPs to be received via MQTT as strings, converted to DWORDs via STR2INT into V1020/V1021, then passed to NETTIME. If NETTIME only accepts a constant DWORD, an alternative approach is needed.
+**IP parameter:** Must be a **D register** containing the server IP as a DWORD. ✅ confirmed — V registers and inline constants are not accepted.
 
-> ❌ Do NOT use held-ON condition — NETTIME is edge-triggered.
+The NTP IP is received via MQTT as a dotted-decimal string (e.g. `"10.250.2.110"`), converted to a DWORD via STR2INT, and stored in a D register (D1020 for primary, D1021 for secondary) before NETTIME is called.
+
+> ❌ Do NOT use a held-ON condition — NETTIME is edge-triggered.
+> ❌ `NETTIME @IntEthernet 184156782 ...` — inline constant DWORD not accepted.
+> ❌ `NETTIME @IntEthernet V1020 ...` — V register not accepted.
 
 ---
 
@@ -329,21 +329,14 @@ MQTTPUB @MQTT_DEPT 0x11 5000 SS9 "3 0x10 ""hello"" SS1" 0x0 C12 C13 DST511
 
 > ✅ **Confirmed pattern — dynamic per-PLC topic using SS register in P4 topic field:**
 > ```
-> // ST0 rungs (guaranteed before MQTTSUB fires):
 > STR ST0
 > STRPRINT SS8 0x4 """bootstrap/provision/"""
 >
 > STR ST0
 > STRPRINT SS10 0x4 "SerialNum"
 >
-> // BOOTSTRAP subscription rung:
-> // SS8 + SS10 = "bootstrap/provision/00:E0:62:30:9F:13"
 > MQTTSUB @MQTT_DEPT 0x10 SS8 "3 0x10 SS10 SL0" C23 C13 DST511
 > ```
-
-> ⚠️ Build all SS registers used in MQTTSUB at **ST0** (first scan), not ST1. If built at ST1, the register may be empty when MQTTSUB fires on the same scan.
-
-> ✅ MQTTSUB does **not** support wildcard topics (+ or #). All topics must be listed explicitly.
 
 ### MQTT Device Definition ✅
 ```
@@ -373,7 +366,7 @@ STRPRINT SS10 0x4 "SerialNum"
 **Requires exactly 6 parameters. P6 = find-text (last parameter).**
 ```
 MOVE 0 D2000
-STRFIND SL0 0x0 D2000 C25 C26 SS8    // SS register find-text ✅
+STRFIND SL0 0x0 D2000 C25 C26 SS8
 ```
 
 | # | Value | Notes |
@@ -389,7 +382,6 @@ STRFIND SL0 0x0 D2000 C25 C26 SS8    // SS register find-text ✅
 ```
 MOVE 0 D2000
 STRSUB SL0 D2000 0x0 32 SS0
-// Extracts 32 chars starting at offset D2000
 ```
 
 | # | Value | Notes |
@@ -402,19 +394,20 @@ STRSUB SL0 D2000 0x0 32 SS0
 
 ### STRCOPY / STRCLEAR ✅
 ```
-STRCOPY SL0 SS0 64    // copies from start, no offset
-STRCLEAR SL0 1        // count required
+STRCOPY SL0 SS0 64
+STRCLEAR SL0 1
 ```
 
-### STR2INT ✅ (confirmed from official docs)
-Converts a string to an integer value. Used to convert dotted-decimal IP strings received via MQTT into DWORD values for use with NETTIME and other network instructions.
+### STR2INT ⚠️
+Converts a string to an integer (DWORD). Used to convert dotted-decimal IP strings received via MQTT into DWORD values for storage in D registers, which are then passed to NETTIME.
 
 ```
-STR2INT SS5 V1020    // converts "10.250.2.110" → DWORD in V1020
-STR2INT SS6 V1021    // converts "10.250.2.210" → DWORD in V1021
+// Suspected syntax — text import syntax unconfirmed:
+STR2INT SS5 D1020    // converts "10.250.2.110" → DWORD in D1020
+STR2INT SS6 D1021    // converts "10.250.2.210" → DWORD in D1021
 ```
 
-> ⚠️ Confirm text import syntax. The conversion of a dotted-decimal IP string to a network DWORD may require `FmtInt` or a specific format flag — needs testing.
+> ⚠️ Text import syntax unconfirmed. Destination must be a D register (required by NETTIME). Confirm whether STR2INT interprets a dotted-decimal IP string as a network-order DWORD or as a plain integer.
 
 ### String Register Types
 | Type | Description |
@@ -460,8 +453,8 @@ STR2INT SS6 V1021    // converts "10.250.2.210" → DWORD in V1021
 | IP | Decimal DWORD | Description |
 |---|---|---|
 | 10.250.2.102 | 184156774 | Mosquitto MQTT (Dept) |
-| 10.250.2.110 | 184156782 | NTP Primary |
-| 10.250.2.210 | 184156882 | NTP Secondary |
+| 10.250.2.110 | 184156782 | NTP Primary (Dept) |
+| 10.250.2.210 | 184156882 | NTP Secondary (Dept) |
 | 10.15.144.14 | 168792078 | Corporate MQTT |
 
 ---
