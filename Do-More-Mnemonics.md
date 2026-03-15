@@ -164,6 +164,17 @@ MQTTSUB does not support `+` or `#` wildcard characters in topics. All subscript
 - Up to **100 topics per MQTT Client device**, spread across a maximum of **10 active MQTTSUB instructions**
 - To subscribe to more than 100 topics, create multiple MQTT Client devices pointing to the same broker
 
+### Rule 12: MQTTSUB P4 subscription flag is 0x0, NOT 0x10 ✅ (confirmed v2.41)
+
+The per-entry flag in the MQTTSUB P4 table is `0x0` for subscriptions. Using `0x10` (the MQTTPUB retain flag) causes internal parser errors ("aRow.GetCount() returned bad value"). C-bit destinations are valid in MQTTSUB P4 table entries.
+
+> ✅ Correct MQTTSUB multi-topic P4 entry format:
+> ```
+> // Flag 0x0 = subscribe
+> "3 0x0 ""topic/suffix"" C50 0x0 ""other/topic"" C51 ..."
+> ```
+> ❌ Do NOT use `0x10` in MQTTSUB P4 — that flag is for MQTTPUB retain.
+
 ---
 
 ## Program / Task Structure
@@ -267,21 +278,28 @@ PING @IntEthernet 0x1 <ip-dword> 500 DST511 0x0 <ok-bit> <fail-bit>
 ```
 > ❌ `PING @MQTT_DEPT ...` — MQTT device references not valid for PING.
 
-### NETTIME ⚠️
-SNTP client — text import syntax unconfirmed.
+### NETTIME ✅ (confirmed v2.41)
+SNTP client. Edge-triggered — fires once per OFF→ON transition.
 
-**Suspected syntax:**
 ```
-NETTIME @IntEthernet D1020 123 5000 C_NtpOK C_NtpErr
+NETTIME @IntEthernet D1020 123 5000 0x0 C45 C46
 ```
 
-**IP parameter:** Must be a **D register** containing the server IP as a DWORD. ✅ confirmed — V registers and inline constants are not accepted.
+**Parameters:**
+| # | Value | Notes |
+|---|---|---|
+| P1 | `@IntEthernet` | Ethernet device |
+| P2 | D register | NTP server IP as DWORD — **D register required**, not V, not constant |
+| P3 | `123` | UDP port (NTP standard) |
+| P4 | `5000` | Timeout ms |
+| P5 | `0x0` | Flags word — required, must be present |
+| P6 | C bit | Set ON if sync succeeds |
+| P7 | C bit | Set ON if sync fails |
 
-The NTP IP DWORD is received via MQTT as a plain integer string (e.g. `"184156782"`), converted via STR2INT into D1020 (primary) / D1021 (secondary). Ignition publishes the IP in this format — **not** as dotted-decimal — because STR2INT handles plain integers directly.
-
-> ❌ Do NOT use a held-ON condition — NETTIME is edge-triggered.
-> ❌ `NETTIME @IntEthernet 184156782 ...` — inline constant not accepted.
+> ❌ Do NOT use held-ON condition — NETTIME is edge-triggered.
+> ❌ `NETTIME @IntEthernet 184156782 ...` — inline DWORD constant not accepted.
 > ❌ `NETTIME @IntEthernet V1020 ...` — V register not accepted.
+> ❌ `NETTIME @IntEthernet D1020 123 5000 C45 C46` — missing `0x0` flags word, causes "too few parameters" error.
 
 ---
 
@@ -320,22 +338,27 @@ MQTTPUB @MQTT_DEPT 0x11 5000 SS9 "3 0x10 ""hello"" SS1" 0x0 C12 C13 DST511
 | P1 | `@MQTT_DEPT` | MQTT device reference |
 | P2 | `0x10` | |
 | P3 | SS register | Topic prefix (must end with `/` if suffix follows) |
-| P4 | `"count flags topic destination"` | topic field appended to P3; accepts SS register name |
+| P4 | `"count flags topic destination"` | Per-entry flag must be `0x0` (not `0x10`) |
 | P5 | C bit | Subscribe-OK bit |
 | P6 | C bit | Error bit |
 | P7 | `DST511` | Status register |
 
 **Capacity:** 50 subscriptions per instruction, 100 topics per MQTT Client device (max 10 instructions). No wildcard support.
 
-> ✅ **Confirmed pattern — dynamic per-PLC topic using SS register in P4 topic field:**
+**P4 entry flag:** `0x0` for all subscription entries. Using `0x10` causes internal parser errors.
+
+**C-bit destinations:** Confirmed valid in MQTTSUB P4 table entries. Received "1"/"0" payload is stored to the bit.
+
+> ✅ **Single-topic pattern (confirmed v2.37):**
 > ```
-> STR ST0
-> STRPRINT SS8 0x4 """bootstrap/provision/"""
->
-> STR ST0
-> STRPRINT SS10 0x4 "SerialNum"
->
 > MQTTSUB @MQTT_DEPT 0x10 SS8 "3 0x10 SS10 SL0" C23 C13 DST511
+> ```
+> Note: The outer P4 uses `0x10` as the MQTTSUB instruction flag (P2 of the outer instruction).
+> The per-entry flags inside the P4 string are `0x0`.
+
+> ✅ **Multi-topic pattern (confirmed v2.41):**
+> ```
+> MQTTSUB @MQTT_DEPT 0x10 SS0 "3 0x0 ""config/ntp/primary"" SS5 0x0 ""config/ntp/secondary"" SS6 0x0 ""config/lighting/area/carousel-plaza"" C50" C43 C13 DST511
 > ```
 
 ### MQTT Device Definition ✅
@@ -398,17 +421,25 @@ STRCOPY SL0 SS0 64
 STRCLEAR SL0 1
 ```
 
-### STR2INT ⚠️
+### STR2INT ✅ (confirmed v2.41)
 Converts a **plain integer string** to a DWORD integer value. Used to convert NTP IP DWORD strings received via MQTT into D registers for NETTIME.
 
 ```
-// Suspected syntax — text import syntax unconfirmed:
-STR2INT SS5 D1020    // "184156782" → DWORD 184156782 in D1020  (= 10.250.2.110)
-STR2INT SS6 D1021    // "184156882" → DWORD 184156882 in D1021  (= 10.250.2.210)
+STR2INT SS5 10 D1020 DST511    // "184156782" → DWORD 184156782 in D1020  (= 10.250.2.110)
+STR2INT SS6 10 D1021 DST511    // "184156882" → DWORD 184156882 in D1021  (= 10.250.2.210)
 ```
 
+**Parameters:**
+| # | Value | Notes |
+|---|---|---|
+| P1 | SS register | Source string |
+| P2 | `10` | Numeric base (10 = decimal) |
+| P3 | D register | Destination DWORD |
+| P4 | `DST511` | Status register |
+
 > ✅ Works correctly for plain integer strings. Ignition publishes NTP IPs in this format.
-> ❌ Do NOT use dotted-decimal IP strings (e.g. `"10.250.2.110"`) — STR2INT parses as a plain integer and would produce the wrong value. Ignition must publish the pre-computed DWORD integer string instead.
+> ❌ Do NOT use dotted-decimal IP strings (e.g. `"10.250.2.110"`) — STR2INT treats them as a plain integer starting at `10`, producing the wrong value.
+> ❌ `STR2INT SS5 D1020` — missing base and status parameters, causes "too few parameters" error.
 
 ### String Register Types
 | Type | Description |
