@@ -253,6 +253,14 @@ TMR T0 10000
 - `T0.Done` ✅ — valid contact
 - `T0.TT` ❌ — not valid in text import
 - `T0.Run` ❌ — not valid in text import
+- `T0.Acc` ❌ — not valid as MOVE destination in text import (`MOVE 0 T0.Acc` causes "Unknown extra characters in string" error)
+
+> ✅ Exception: `T5.Acc` (and other timer accumulators) CAN be used as a MOVE destination in ST0 reset blocks — this is confirmed working for resetting retentive timers on STOP→RUN:
+> ```
+> STR ST0
+> MOVE 0 T5.Acc   // ✅ valid at ST0
+> ```
+> ❌ However, using `MOVE 0 T20.Acc` in normal ladder logic (non-ST0) causes an import error. Use a dedicated separate timer instead of trying to reset a retentive timer mid-program.
 
 ---
 
@@ -506,6 +514,22 @@ STR2INT SS6 10 D1021 DST511    // "184156882" → DWORD 184156882 in D1021  (= 1
 | `DST511` | Network instruction status register |
 | `D1000:UB2` | Byte 2 (2nd octet) of DWORD |
 
+### DateTime Registers ✅ (confirmed)
+| Register | Description |
+|---|---|
+| `SDT0.Hour` | Current hour (0–23) — use in MOVE/STRE/ANDE comparisons |
+| `SDT0.Minute` | Current minute (0–59) |
+
+> ✅ Valid usage:
+> ```
+> STR ST1
+> MOVE SDT0.Hour D1032
+>
+> STR ST1
+> MOVE SDT0.Minute D1035
+> ```
+> ❌ `DST0.Hour` — DST0 is the scan counter, NOT a datetime register. This causes "Unknown extra characters in string" import error.
+
 ---
 
 ## IP Address Handling
@@ -529,12 +553,14 @@ STR2INT SS6 10 D1021 DST511    // "184156882" → DWORD 184156882 in D1021  (= 1
 | `STRGET` | Use `STRSUB` |
 | `ADDD` | Does not exist |
 | `T0.TT` / `T0.Run` | Not valid in text import |
+| `T0.Acc` (in normal ladder) | Not valid as MOVE destination in normal ladder — causes import error. Only valid in ST0 reset blocks. |
+| `DST0.Hour` / `DST0.Minute` | DST0 is scan counter, not datetime. Use `SDT0.Hour` / `SDT0.Minute` instead. |
 
 ---
 
 ## Element Documentation Format ✅
 
-> Nickname max 16 characters.
+> Nickname max **16 characters**. Exceeding this causes a "Nickname too long" import error.
 
 ```
 #BEGIN ELEMENT_DOC
