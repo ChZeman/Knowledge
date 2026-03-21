@@ -191,6 +191,47 @@ Using `0x0` in either location disables prefix concatenation — the P3 SS regis
 
 > ❌ **Wrong — mixed flags:** Using `0x0` for P2 but `0x10` in per-entry flags (or vice versa) will not produce prefix concatenation.
 
+### Rule 14: OUT coil can only appear ONCE per program for a given address ✅
+
+`OUT` is a regular (non-latching) coil. If the same address appears in multiple `OUT` rungs, **only the last rung in the scan drives the output** — earlier rungs have no effect. The compiler warns W221 "coil duplicated N times."
+
+> ❌ Wrong — Y0 driven by two OUT rungs; first rung is dead:
+> ```
+> STRE V1020 1
+> OUT Y0      ← this rung has no effect
+>
+> STRE V1020 5
+> OUT Y0      ← only this one drives Y0
+> ```
+
+> ✅ Correct — use SET/RST when the same output needs to be driven from multiple states:
+> ```
+> // On state entry: latch ON
+> STRE V1020 1
+> ANDN Y0
+> SET Y0
+>
+> // On pulse done: latch OFF, advance state
+> STRE V1020 1
+> AND T20.Done
+> RST Y0
+>
+> // Same pattern for state 5
+> STRE V1020 5
+> ANDN Y0
+> SET Y0
+>
+> STRE V1020 5
+> AND T23.Done
+> RST Y0
+> ```
+
+> Also RST the output in the ST0 reset block to ensure clean state on STOP→RUN:
+> ```
+> STR ST0
+> RST Y0
+> ```
+
 ---
 
 ## Program / Task Structure
