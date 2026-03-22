@@ -232,6 +232,33 @@ Using `0x0` in either location disables prefix concatenation — the P3 SS regis
 > RST Y0
 > ```
 
+### Rule 15: V registers are NOT valid MQTTSUB destinations ❌ (confirmed v2.70)
+
+**V registers silently accept no data when used as MQTTSUB destinations.** The import succeeds with no error, but the V register always reads 0 regardless of the MQTT payload received.
+
+> ❌ Wrong — V register destination; no data delivered:
+> ```
+> MQTTSUB @MQTT_DEPT 0x0 SS11 "3 0x0 ""Lighting/Command/Area/carousel-plaza"" V1030" C92 C93 DST511
+> // V1030 always remains 0 -- payload never delivered
+> ```
+
+> ✅ Correct — use D registers for numeric payloads:
+> ```
+> MQTTSUB @MQTT_DEPT 0x0 SS11 "3 0x0 ""Lighting/Command/Area/carousel-plaza"" D1050" C92 C93 DST511
+> // D1050 correctly receives 0x00 (OFF) or 0x01 (ON)
+> ```
+
+**Valid MQTTSUB destination types:**
+| Type | Valid | Notes |
+|---|---|---|
+| C-bit | ✅ | Any received payload sets the bit; 0x00 does NOT clear it |
+| D register | ✅ | Correctly receives numeric byte values including 0x00 |
+| SS register | ✅ | Receives string payload |
+| SL register | ✅ | Receives string payload (larger buffer) |
+| V register | ❌ | Import succeeds but data is never delivered |
+
+> **Important corollary:** C-bit destinations cannot be cleared by a `0x00` payload — any received message sets the bit. Use D register destinations and derive C-bits via `STRE D == 0 / RST C` and `STRNE D == 0 / SET C`.
+
 ---
 
 ## Program / Task Structure
@@ -417,7 +444,10 @@ MQTTPUB @MQTT_DEPT 0x11 5000 SS9 "3 0x10 ""hello"" SS1" 0x0 C12 C13 DST511
 | **Mixed** | `0x10` | `0x0` | ❌ Undefined / wrong behavior |
 | **Mixed** | `0x0` | `0x10` | ❌ Undefined / wrong behavior |
 
-**C-bit and SS register destinations** are both valid in P4 entries.
+**Valid destination types in P4 entries:** C-bits, D registers, SS registers, SL registers.
+**❌ V registers are NOT valid** — import succeeds silently but no data is ever delivered. Use D registers instead (see Rule 15).
+
+**C-bit destinations cannot be cleared by 0x00 payload** — any received message sets the bit. Use D register destinations and derive C-bits via comparison.
 
 **Capacity:** 50 subscriptions per instruction, 100 topics per MQTT Client device (max 10 instructions). No wildcard support.
 
@@ -427,16 +457,10 @@ MQTTPUB @MQTT_DEPT 0x11 5000 SS9 "3 0x10 ""hello"" SS1" 0x0 C12 C13 DST511
 > MQTTSUB @MQTT_DEPT 0x10 SS0 "3 0x10 ""config/ntp/primary"" SS5 0x10 ""config/ntp/secondary"" SS6 0x10 ""config/lighting/area/carousel-plaza"" C50" C43 C13 DST511
 > ```
 
-> ✅ **Prefix mode, single-topic with SS register as topic (confirmed v2.37):**
+> ✅ **No-prefix mode with D register destinations (confirmed v2.71):**
 > ```
-> // SS8 = "bootstrap/provision/" → subscribes to bootstrap/provision/<MAC>
-> MQTTSUB @MQTT_DEPT 0x10 SS8 "3 0x10 SS10 SL0" C23 C13 DST511
-> ```
-
-> ✅ **No-prefix mode, multi-topic (confirmed v2.42):**
-> ```
-> // Topics subscribed exactly as written — P3 not prepended
-> MQTTSUB @test 0x0 SS0 "3 0x0 ""top_level/field/"" C10 0x0 ""top_level/field1/"" D1" C0 C1 DST511
+> // D1050 correctly receives 0x00 (OFF) or 0x01 (ON)
+> MQTTSUB @MQTT_DEPT 0x0 SS11 "3 0x0 ""Lighting/Command/Area/carousel-plaza"" D1050" C92 C93 DST511
 > ```
 
 ### MQTT Device Definition ✅
@@ -596,6 +620,7 @@ STR2INT SS6 10 D1021 DST511    // "184156882" → DWORD 184156882 in D1021  (= 1
 | `T0.TT` / `T0.Run` | Not valid in text import |
 | `T0.Acc` (in normal ladder) | Not valid as MOVE destination in normal ladder — causes import error. Only valid in ST0 reset blocks. |
 | `DST0.Hour` / `DST0.Minute` | DST0 is scan counter, not datetime. Use `SDT0.Hour` / `SDT0.Minute` instead. |
+| V register as MQTTSUB destination | Import succeeds silently but no data is ever delivered. Use D registers instead. |
 
 ---
 
