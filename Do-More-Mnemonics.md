@@ -251,13 +251,45 @@ Using `0x0` in either location disables prefix concatenation — the P3 SS regis
 **Valid MQTTSUB destination types:**
 | Type | Valid | Notes |
 |---|---|---|
-| C-bit | ✅ | Any received payload sets the bit; 0x00 does NOT clear it |
+| C-bit | ✅ | Payload `"1"` (ASCII 0x31) sets the bit. Payload `"0"` (ASCII 0x30) clears the bit. Binary 0x00 does NOT clear it. |
 | D register | ✅ | Correctly receives numeric byte values including 0x00 |
 | SS register | ✅ | Receives string payload |
 | SL register | ✅ | Receives string payload (larger buffer) |
 | V register | ❌ | Import succeeds but data is never delivered |
 
-> **Important corollary:** C-bit destinations cannot be cleared by a `0x00` payload — any received message sets the bit. Use D register destinations and derive C-bits via `STRE D == 0 / RST C` and `STRNE D == 0 / SET C`.
+> **C-bit destination behavior (confirmed v2.88):** When Ignition publishes string payloads `"1"` and `"0"`, C-bit destinations work correctly — `"1"` sets the bit and `"0"` clears it. The documented caveat about "0x00 does not clear" applies to **binary zero byte payloads**, not ASCII `"0"` (0x30). This means C-bit destinations are valid for Ignition-published enable/disable topics that use `"1"`/`"0"` string payloads.
+
+### Rule 16: Parallel STR branches to OUT coil are NOT valid in text import ❌ (confirmed v2.87)
+
+In graphical ladder, multiple parallel branches can feed a single `OUT` coil. In text import format, each `STR` instruction starts a **new rung** (Rule 1), so multiple consecutive `STR` lines before an `OUT` are interpreted as separate rungs — causing a "Rung Contains Too Many STR Instructions" error on the `OUT` rung.
+
+> ❌ Wrong — this does NOT create parallel branches to OUT C154:
+> ```
+> STR C50
+> STR C51
+> STR C52
+> OUT C154   ← error: "Rung Contains Too Many STR Instructions"
+> ```
+
+> ✅ Correct — use SET/RST pattern: clear the bit once per scan, then set it from each condition:
+> ```
+> // Clear at start of scan
+> STR ST1
+> RST C154
+>
+> // Set from each zone flag
+> STR C50
+> SET C154
+>
+> STR C51
+> SET C154
+>
+> STR C52
+> SET C154
+> // ... etc
+> ```
+
+> This SET/RST pattern is valid because `C154` appears in exactly one `RST` rung and multiple `SET` rungs — no Rule 14 (OUT duplication) violation since `OUT` is not used.
 
 ---
 
@@ -447,20 +479,14 @@ MQTTPUB @MQTT_DEPT 0x11 5000 SS9 "3 0x10 ""hello"" SS1" 0x0 C12 C13 DST511
 **Valid destination types in P4 entries:** C-bits, D registers, SS registers, SL registers.
 **❌ V registers are NOT valid** — import succeeds silently but no data is ever delivered. Use D registers instead (see Rule 15).
 
-**C-bit destinations cannot be cleared by 0x00 payload** — any received message sets the bit. Use D register destinations and derive C-bits via comparison.
+**C-bit destinations:** `"1"` sets the bit, `"0"` clears the bit (when Ignition publishes ASCII string payloads). See Rule 15 for full details.
 
 **Capacity:** 50 subscriptions per instruction, 100 topics per MQTT Client device (max 10 instructions). No wildcard support.
 
-> ✅ **Prefix mode, multi-topic (confirmed v2.43):**
+> ✅ **Prefix mode, multi-topic with C-bit destinations (confirmed v2.88):**
 > ```
-> // SS0 = "Buildings/0000/" → subscribes to Buildings/0000/config/ntp/primary, etc.
-> MQTTSUB @MQTT_DEPT 0x10 SS0 "3 0x10 ""config/ntp/primary"" SS5 0x10 ""config/ntp/secondary"" SS6 0x10 ""config/lighting/area/carousel-plaza"" C50" C43 C13 DST511
-> ```
-
-> ✅ **No-prefix mode with D register destinations (confirmed v2.71):**
-> ```
-> // D1050 correctly receives 0x00 (OFF) or 0x01 (ON)
-> MQTTSUB @MQTT_DEPT 0x0 SS11 "3 0x0 ""Lighting/Command/Area/carousel-plaza"" D1050" C92 C93 DST511
+> // SS0 = "Buildings/0000/" → subscribes to Buildings/0000/config/lighting/area/*, etc.
+> MQTTSUB @MQTT_DEPT 0x10 SS0 "3 0x10 ""config/lighting/area/carousel-plaza"" C50 0x10 ""config/lighting/area/county-fair"" C51" C150 C151 DST511
 > ```
 
 ### MQTT Device Definition ✅
@@ -621,6 +647,7 @@ STR2INT SS6 10 D1021 DST511    // "184156882" → DWORD 184156882 in D1021  (= 1
 | `T0.Acc` (in normal ladder) | Not valid as MOVE destination in normal ladder — causes import error. Only valid in ST0 reset blocks. |
 | `DST0.Hour` / `DST0.Minute` | DST0 is scan counter, not datetime. Use `SDT0.Hour` / `SDT0.Minute` instead. |
 | V register as MQTTSUB destination | Import succeeds silently but no data is ever delivered. Use D registers instead. |
+| Multiple STR before OUT (parallel branches) | NOT valid in text import. Each STR starts a new rung. Use STR ST1 / RST + individual STR / SET pattern instead. See Rule 16. |
 
 ---
 
