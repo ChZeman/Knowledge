@@ -1,9 +1,9 @@
 # /etc/netplan/00-installer-config.yaml
-# ignition-standby (10.250.2.201)
+# ignition-primary (10.250.2.101)
 #
 # Two NICs:
 #   enp6s18          — department network 10.250.0.0/19  (metric 100, preferred)
-#   enxc8a362b4ae82  — corporate network  10.15.144.0/24 (metric 200, fallback)
+#   enxc8a362a8bef1  — corporate network  10.15.144.0/24 (metric 200, fallback)
 #
 # Both NICs have a default route. The department network (metric 100) is preferred
 # for internet traffic. The corporate network (metric 200) is used as fallback if
@@ -19,7 +19,7 @@ network:
       dhcp6: false
       accept-ra: false
       addresses:
-        - 10.250.2.201/19
+        - 10.250.2.101/19
       nameservers:
         addresses:
           - 10.250.2.109
@@ -30,11 +30,11 @@ network:
         - to: default
           via: 10.250.0.1
           metric: 100
-    enxc8a362b4ae82:
+    enxc8a362a8bef1:
       dhcp4: false
       dhcp6: false
       addresses:
-        - 10.15.144.12/24
+        - 10.15.144.11/24
       routes:
         - to: default
           via: 10.15.144.1
