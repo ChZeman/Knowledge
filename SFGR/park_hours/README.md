@@ -13,18 +13,25 @@ Ignition reads the park calendar from a DB table (`park_calendar`) and publishes
 | `import_calendar.py` | Run once per season to load the Excel calendar into the DB |
 | `publish_park_hours.py` | Scheduled script (5 AM daily) — publishes to MQTT |
 
+## NAS file location
+
+```
+/mnt/nas_sfgr/Building Monitoring and Control/Park Hours/Park Hours.xlsx
+```
+Sheet name: `Calendar`
+Columns used: `Date` (col 0), `Hours Type` (col 1), `Closed` (col 5)
+
 ## Setup sequence
 
-1. **NAS:** `ignition-svc` user already created with read/write access to `Ride Data` share.
-2. **Both servers:** Follow `NAS_MOUNT_SETUP.md`. Ignition OS user is `sftp` (confirmed).
-3. **DB:** Run `db_setup.sql` in Ignition Script Console to create the `park_calendar` table.
-4. **Import:** Drop `Calendar_1_.xlsx` in the root of the `Ride Data` share, then run `import_calendar.py` from Script Console. No CSV export needed — reads xlsx directly via POI (bundled with Ignition 8.1.x).
-5. **Schedule:** Add `publish_park_hours.py` as a Gateway Scheduled script, daily at 05:00.
-6. **Verify:** Run `publish_park_hours.py` manually from Script Console; check MQTT Explorer for `Park/hours/*`.
+1. **NAS:** `ignition-svc` user created with read/write access to `Ride Data` share. Both servers mounted at `/mnt/nas_sfgr`.
+2. **DB:** Run `db_setup.sql` in Ignition Script Console to create the `park_calendar` table.
+3. **Import:** Run `import_calendar.py` from Ignition Script Console. Reads `Park Hours.xlsx` directly via POI (bundled with Ignition 8.1.x) — no CSV export needed.
+4. **Schedule:** Add `publish_park_hours.py` as a Gateway Scheduled script, daily at 05:00.
+5. **Verify:** Run `publish_park_hours.py` manually from Script Console; check MQTT Explorer for `Park/hours/*`.
 
 ## Annual calendar update
 
-1. Get new `.xlsx` from operations → drop on NAS share as `Calendar_1_.xlsx` (overwrite).
+1. Operations updates `Park Hours.xlsx` on the NAS (in place).
 2. Run `import_calendar.py` from Script Console.
    - Rows with active operator overrides are preserved.
    - All other rows are updated.
@@ -54,4 +61,4 @@ All topics published with QoS 1, retained.
 - Dual-session days (e.g. `GN 10:30-20:00; 21:30-3:00`): import uses first open, last close from parenthetical.
 - Closed days publish `open_epoch=0`, `close_epoch=0`, `is_open=0`.
 - `nofail` in fstab ensures servers boot even if NAS is offline.
-- Ignition backup path: `Gateway > Config > Backup/Restore` — set output to `/mnt/nas_sfgr/ignition-backups/`.
+- Ignition backup destination: `Gateway > Config > Backup/Restore` — set to `/mnt/nas_sfgr/ignition-backups/`.

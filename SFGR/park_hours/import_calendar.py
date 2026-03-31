@@ -2,7 +2,7 @@
 Park Calendar Import Script
 ===========================
 Run from Ignition Script Console (Tools > Script Console).
-Reads Calendar_1_.xlsx directly from the NAS mount using Apache POI,
+Reads Park Hours.xlsx directly from the NAS mount using Apache POI,
 which is already bundled with Ignition 8.1.x.
 
 Run once per season, or whenever the calendar is updated on the NAS.
@@ -22,11 +22,11 @@ from org.apache.poi.xssf.usermodel import XSSFWorkbook
 from java.io import FileInputStream
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-DB_NAME   = "SFGR"                                    # Ignition DB connection name
-XLSX_PATH = "/mnt/nas_sfgr/Calendar_1_.xlsx"         # Direct xlsx read — no CSV needed
-SHEET     = "Calendar"                               # Sheet name in the workbook
+DB_NAME   = "SFGR"
+XLSX_PATH = "/mnt/nas_sfgr/Building Monitoring and Control/Park Hours/Park Hours.xlsx"
+SHEET     = "Calendar"   # Sheet name confirmed
 
-# Column indices (0-based) matching Calendar_1_.xlsx
+# Column indices (0-based) confirmed against actual file:
 COL_DATE      = 0   # Date
 COL_HOURSTYPE = 1   # Hours Type
 COL_CLOSED    = 5   # Closed (boolean)
@@ -41,7 +41,6 @@ def cell_str(cell):
     if ct == 'STRING':
         return cell.getStringCellValue().strip()
     elif ct == 'NUMERIC':
-        # Date cells are stored as numeric in xlsx
         from org.apache.poi.ss.usermodel import DateUtil
         if DateUtil.isCellDateFormatted(cell):
             dt = cell.getDateCellValue()  # java.util.Date
@@ -50,7 +49,6 @@ def cell_str(cell):
     elif ct == 'BOOLEAN':
         return str(cell.getBooleanCellValue())
     elif ct == 'FORMULA':
-        # Evaluate cached result
         cached = cell.getCachedFormulaResultType().toString()
         if cached == 'STRING':
             return cell.getRichStringCellValue().getString().strip()
@@ -66,7 +64,7 @@ def cell_str(cell):
 
 def parse_times(hours_type_str):
     """
-    Extract open/close from the parenthetical in HoursType, e.g. (10:30AM - 8:00PM).
+    Extract open/close from the parenthetical in Hours Type, e.g. (10:30AM - 8:00PM).
     Returns (open_str, close_str, crosses_midnight) as 'HH:MM' 24h, or (None, None, False).
     """
     s = str(hours_type_str).strip()
@@ -140,8 +138,8 @@ def run():
                 skipped += 1
                 continue
 
-            # Normalise date string — may be "YYYY-MM-DD" or Java Date string
-            date_str = date_raw.split(' ')[0]  # take YYYY-MM-DD portion
+            # Normalise date — POI returns java.util.Date stringified as e.g. "2026-04-23"
+            date_str = date_raw.split(' ')[0]
             try:
                 cal_date = datetime.strptime(date_str, '%Y-%m-%d').date()
             except ValueError:
@@ -151,7 +149,7 @@ def run():
             closed = closed_raw in ('true', '1', 'yes')
             open_t, close_t, crosses = parse_times(hours_type)
 
-            # Rows marked not-closed but with no parseable times are placeholders
+            # Rows marked not-closed but with no parseable times are planning placeholders
             if not closed and open_t is None:
                 closed = True
 
@@ -161,7 +159,7 @@ def run():
             )
 
             if existing > 0:
-                # Only update non-overridden rows so operator overrides are preserved
+                # Preserve operator overrides — only update non-overridden rows
                 system.db.runUpdateQuery(
                     """UPDATE park_calendar
                        SET hours_type = ?, open_time = ?, close_time = ?,
