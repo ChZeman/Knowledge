@@ -3,7 +3,8 @@
 NAS IP: `10.250.2.10`
 Share: `Ride Data`
 Mount point (both servers): `/mnt/nas_sfgr`
-User: `ignition-svc` (read/write — needed for Ignition backups)
+NAS user: `ignition-svc` (read/write)
+Ignition OS service user: **`sftp`** (confirmed via `ps aux`)
 
 ---
 
@@ -41,12 +42,13 @@ sudo nano /etc/fstab
 ```
 Add this line (note: share name has a space — must be escaped as `\040`):
 ```
-//10.250.2.10/Ride\040Data  /mnt/nas_sfgr  cifs  credentials=/etc/nas_sfgr_credentials,uid=ignition,gid=ignition,iocharset=utf8,vers=3.0,file_mode=0664,dir_mode=0775,nofail,x-systemd.automount  0  0
+//10.250.2.10/Ride\040Data  /mnt/nas_sfgr  cifs  credentials=/etc/nas_sfgr_credentials,uid=sftp,gid=sftp,iocharset=utf8,vers=3.0,file_mode=0664,dir_mode=0775,nofail,x-systemd.automount  0  0
 ```
 
+> **`uid=sftp,gid=sftp`** — Ignition runs as the `sftp` OS user on these servers.
 > **`nofail`** — server boots normally even if NAS is unreachable.
 > **`x-systemd.automount`** — mount deferred until first access, avoids boot delays.
-> **`file_mode=0664,dir_mode=0775`** — read/write for Ignition backups.
+> **`file_mode=0664,dir_mode=0775`** — read/write access for Ignition backups.
 > **`\040`** — fstab escape for a space in the share name.
 
 ### 5. Mount now (without rebooting)
@@ -59,9 +61,9 @@ sudo mount -a
 ls /mnt/nas_sfgr
 ```
 
-### 7. Verify write access (Ignition backup test)
+### 7. Verify write access
 ```bash
-sudo -u ignition touch /mnt/nas_sfgr/write_test && echo "Write OK" && sudo -u ignition rm /mnt/nas_sfgr/write_test
+sudo -u sftp touch /mnt/nas_sfgr/write_test && echo "Write OK" && sudo -u sftp rm /mnt/nas_sfgr/write_test
 ```
 
 ---
@@ -70,8 +72,8 @@ sudo -u ignition touch /mnt/nas_sfgr/write_test && echo "Write OK" && sudo -u ig
 
 | Purpose | Path |
 |---|---|
-| Park calendar CSV | `/mnt/nas_sfgr/park_calendar.csv` |
-| Ignition backups | `/mnt/nas_sfgr/ignition-backups/` (configure in Gateway > Backup) |
+| Park calendar | `/mnt/nas_sfgr/Calendar_1_.xlsx` |
+| Ignition backups | `/mnt/nas_sfgr/ignition-backups/` (configure in Gateway > Config > Backup/Restore) |
 
 ---
 
@@ -79,8 +81,8 @@ sudo -u ignition touch /mnt/nas_sfgr/write_test && echo "Write OK" && sudo -u ig
 
 | Symptom | Fix |
 |---|---|
-| `mount error(13): Permission denied` | Check NAS user permissions; verify credentials file |
+| `mount error(13): Permission denied` | Check NAS share permissions for `ignition-svc`; verify credentials file |
 | `mount error(115): Operation now in progress` | SMB version mismatch — try `vers=2.0` or `vers=2.1` |
 | Mount disappears after reboot | Check fstab syntax; ensure `cifs-utils` installed |
-| Ignition can't write | Check `file_mode`/`dir_mode` and NAS share permissions for `ignition-svc` |
-| Space in share name not mounting | Ensure `\040` escape in fstab (not a literal space) |
+| Ignition can't write | Confirm `uid=sftp` matches actual service user; check NAS user has write access |
+| Space in share name not mounting | Ensure `\040` escape in fstab — not a literal space |
