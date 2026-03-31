@@ -1,0 +1,37 @@
+# /etc/netplan/00-installer-config.yaml
+# ignition-standby (10.250.2.201)
+#
+# Two NICs:
+#   enp6s18          — department network 10.250.0.0/19, carries default route
+#   enxc8a362b4ae82  — corporate network 10.15.144.0/24, subnet-only route
+#
+# Issue fixed 2026-03-31: default route was incorrectly on the corporate NIC,
+# blocking access to Ubuntu package repos and internet-facing services.
+
+network:
+  version: 2
+  renderer: networkd
+  ethernets:
+    enp6s18:
+      dhcp4: false
+      dhcp6: false
+      accept-ra: false
+      addresses:
+        - 10.250.2.201/19
+      nameservers:
+        addresses:
+          - 10.250.2.109
+          - 10.250.2.209
+        search:
+          - localnet
+      routes:
+        - to: default
+          via: 10.250.0.1
+    enxc8a362b4ae82:
+      dhcp4: false
+      dhcp6: false
+      addresses:
+        - 10.15.144.12/24
+      routes:
+        - to: 10.15.144.0/24
+          via: 10.15.144.1
