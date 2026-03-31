@@ -6,42 +6,14 @@ Mount point (both servers): `/mnt/nas_sfgr`
 NAS user: `ignition-svc` (read/write)
 Ignition OS service user: **`sftp`** (confirmed via `ps aux`)
 
-> **Note:** ignition-standby has no internet access. Follow the special
-> cifs-utils install procedure in Step 1 before continuing on that server.
-
 ---
 
-## Step 1 — Install cifs-utils
+## On each server (repeat for ignition-primary AND ignition-standby)
 
-### ignition-primary (has internet)
+### 1. Install cifs-utils
 ```bash
 sudo apt-get install -y cifs-utils
 ```
-
-Then also download the packages for transfer to standby:
-```bash
-mkdir -p ~/cifs-packages && cd ~/cifs-packages
-apt-get download cifs-utils
-apt-get download $(apt-cache depends cifs-utils \
-  | grep '^\s*Depends' | awk '{print $2}')
-```
-
-Copy to ignition-standby over the local network:
-```bash
-scp ~/cifs-packages/*.deb sftp@ignition-standby:~/cifs-packages/
-```
-
-### ignition-standby (no internet — run after SCP above)
-```bash
-cd ~/cifs-packages
-sudo dpkg -i *.deb
-# If dependency errors appear, run a second time — ordering resolves itself:
-sudo dpkg -i *.deb
-```
-
----
-
-## Steps 2–7 — identical on both servers
 
 ### 2. Create the mount point
 ```bash
@@ -77,6 +49,7 @@ Add this line (share name has a space — escaped as `\040` in fstab):
 > **`nofail`** — server boots normally even if NAS is unreachable.
 > **`x-systemd.automount`** — mount deferred until first access, avoids boot delays.
 > **`file_mode=0664,dir_mode=0775`** — read/write for Ignition backups.
+> **`\040`** — fstab escape for a space in the share name.
 
 ### 5. Mount now (without rebooting)
 ```bash
@@ -113,4 +86,3 @@ sudo -u sftp touch /mnt/nas_sfgr/write_test && echo "Write OK" && sudo -u sftp r
 | Mount disappears after reboot | Check fstab syntax; ensure `cifs-utils` installed |
 | Ignition can't write | Confirm `uid=sftp` matches actual service user; check NAS user has write access |
 | Space in share name not mounting | Ensure `\040` escape in fstab — not a literal space |
-| `dpkg` errors on standby | Run `sudo dpkg -i *.deb` a second time — dependency ordering resolves itself |
