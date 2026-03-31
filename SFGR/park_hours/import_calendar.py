@@ -22,9 +22,9 @@ from org.apache.poi.xssf.usermodel import XSSFWorkbook
 from java.io import FileInputStream
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-DB_NAME   = "SFGR"
+DB_NAME   = "IgnitionPostgreSQL"    # Ignition DB connection name (confirmed)
 XLSX_PATH = "/mnt/nas_sfgr/Building Monitoring and Control/Park Hours/Park Hours.xlsx"
-SHEET     = "Calendar"   # Sheet name confirmed
+SHEET     = "Calendar"             # Sheet name confirmed
 
 # Column indices (0-based) confirmed against actual file:
 COL_DATE      = 0   # Date
@@ -138,7 +138,7 @@ def run():
                 skipped += 1
                 continue
 
-            # Normalise date — POI returns java.util.Date stringified as e.g. "2026-04-23"
+            # Normalise date — POI returns java.util.Date stringified e.g. "2026-04-23"
             date_str = date_raw.split(' ')[0]
             try:
                 cal_date = datetime.strptime(date_str, '%Y-%m-%d').date()
