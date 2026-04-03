@@ -215,15 +215,6 @@ Using `0x0` in either location disables prefix concatenation — the P3 SS regis
 > STRE V1020 1
 > AND T20.Done
 > RST Y0
->
-> // Same pattern for state 5
-> STRE V1020 5
-> ANDN Y0
-> SET Y0
->
-> STRE V1020 5
-> AND T23.Done
-> RST Y0
 > ```
 
 > Also RST the output in the ST0 reset block to ensure clean state on STOP→RUN:
@@ -290,6 +281,48 @@ In graphical ladder, multiple parallel branches can feed a single `OUT` coil. In
 > ```
 
 > This SET/RST pattern is valid because `C154` appears in exactly one `RST` rung and multiple `SET` rungs — no Rule 14 (OUT duplication) violation since `OUT` is not used.
+
+### Rule 17: `STR ST1` is only needed when a rung must open unconditionally ✅ (confirmed v2.98)
+
+`STR ST1` (`$On`) is an always-true contact that unconditionally opens a rung. It is **only needed** when the first instruction on a rung is an output instruction that cannot open a rung on its own — such as `RST`, `MOVE`, `SET`, or `OUT` with no preceding condition.
+
+**`STRE`, `STRNE`, `STR`, `STRN` are valid rung-opening instructions and do NOT need a preceding `STR ST1`.**
+
+> ❌ Wrong — unnecessary `STR ST1` before a valid rung-opener:
+> ```
+> STR ST1         ← redundant; wastes scan time
+> ANDE D1043 0
+> AND X8
+> SET C227
+> ```
+
+> ✅ Correct — `ANDE` opens the rung directly:
+> ```
+> ANDE D1043 0
+> AND X8
+> SET C227
+> ```
+
+> ✅ `STR ST1` IS correct and necessary here (RST cannot open a rung on its own):
+> ```
+> STR ST1
+> RST C227
+> ```
+
+> ✅ `STR ST1` IS correct and necessary here (unconditional MOVE every scan):
+> ```
+> STR ST1
+> MOVE SDT0.Hour D1032
+> ```
+
+**Summary — when to use `STR ST1`:**
+| Situation | Use `STR ST1`? |
+|---|---|
+| Opening rung before `RST Cxxx` | ✅ Yes |
+| Opening rung before `MOVE src dst` (unconditional) | ✅ Yes |
+| Opening rung before `OUT Cxxx` (unconditional) | ✅ Yes |
+| Before `STRE`, `STRNE`, `STR`, `STRN` | ❌ No — they open rungs themselves |
+| Before `ANDE`, `ANDNE` (as first instruction) | ❌ No — they are valid rung-openers |
 
 ---
 
@@ -648,6 +681,7 @@ STR2INT SS6 10 D1021 DST511    // "184156882" → DWORD 184156882 in D1021  (= 1
 | `DST0.Hour` / `DST0.Minute` | DST0 is scan counter, not datetime. Use `SDT0.Hour` / `SDT0.Minute` instead. |
 | V register as MQTTSUB destination | Import succeeds silently but no data is ever delivered. Use D registers instead. |
 | Multiple STR before OUT (parallel branches) | NOT valid in text import. Each STR starts a new rung. Use STR ST1 / RST + individual STR / SET pattern instead. See Rule 16. |
+| `STR ST1` before `STRE`/`ANDE`/`ANDNE` | Unnecessary — these are valid rung-opening instructions. Only use `STR ST1` when the rung must open unconditionally (before RST, MOVE, OUT with no condition). See Rule 17. |
 
 ---
 
