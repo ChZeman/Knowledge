@@ -536,7 +536,7 @@ MQTTPUB @MQTT_DEPT 0x11 5000 SS9 "3 0x10 ""hello"" SS1" 0x0 C12 C13 DST511
 
 ### STRPRINT ✅
 ```
-STRPRINT SS1 0x4 """mac="" SerialNum "";ip="" FmtInt(DST18, ipaddr) "";scan="" DST0 "";"""
+STRPRINT SS1 0x4 """mac="" SerialNum "";ip="" FmtInt(DST18,ipaddr) "";scan="" DST0 "";"""
 STRPRINT SS8 0x4 """bootstrap/provision/"""
 STRPRINT SS9 0x4 """bootstrap/"""
 STRPRINT SS10 0x4 "SerialNum"
@@ -545,6 +545,31 @@ STRPRINT SS10 0x4 "SerialNum"
 - `FmtInt(reg, ipaddr)` — formats DWORD as dotted-decimal IP ✅
 - `SerialNum` — PLC MAC address as string ✅
 - ❌ Cannot mix STRPRINT and DUPBOOL in same rung
+
+#### FmtReal — Format a real (floating point) value ⚠️ (documented, not yet import-tested)
+
+`FmtReal(element, fieldWidth, sigDigits, format, justification)` formats a numeric register as a decimal string inside STRPRINT. Integer registers are automatically promoted to Real.
+
+**Parameters:**
+| # | Name | Notes |
+|---|---|---|
+| P1 | element | Any readable numeric register (D, RX, etc.) |
+| P2 | fieldWidth | Minimum digits left of decimal (1–255) |
+| P3 | sigDigits | Digits right of decimal for `dec`/`exp`; total significant digits for `smart` |
+| P4 | format | `dec` = decimal notation, `exp` = exponential, `smart` = shorter of dec/exp |
+| P5 | justification | `right` (pad leading spaces), `left` (pad trailing spaces) |
+
+> ⚠️ Use `left` justification to avoid leading spaces in MQTT payloads.
+
+**Example — publish RTD temperature as `"73.6"` from RX1 (tenths °F):**
+```
+// RX1 holds raw RTD value in tenths °F (e.g. 736 = 73.6°F)
+// FmtReal promotes the integer to Real, then formats with 1 decimal place
+STRPRINT SS25 0x4 "FmtReal(RX1, 4, 1, dec, left)"
+// SS25 → "73.6"
+```
+
+> ⚠️ `FmtReal` syntax is confirmed from Do-More Designer help documentation. Text import compatibility has not yet been verified on hardware — mark confirmed once a successful import is tested.
 
 ### STRFIND ✅
 **Requires exactly 6 parameters. P6 = find-text (last parameter).**
