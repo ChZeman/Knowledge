@@ -366,6 +366,53 @@ MOVE 0 V1000
 ### AND / ANDN / ANDE / ANDNE ✅
 Series conditions — use these mid-rung instead of STR-family.
 
+`ANDE A B` — true when A **equals** B  
+`ANDNE A B` — true when A **does not equal** B
+
+### Relational Comparison Contacts ✅ (confirmed v2.113)
+
+For greater-than / less-than threshold comparisons, use the relational AND instructions. These work correctly with real (floating-point) RX registers from RTD modules as well as integer D registers.
+
+| Mnemonic | Condition | Use for |
+|---|---|---|
+| `ANDGT A B` | A **>** B | Cool output: temp > cool setpoint |
+| `ANDLT A B` | A **<** B | Heat output: temp < heat setpoint |
+| `ANDGE A B` | A **≥** B | Alarm reset: temp recovered above threshold |
+| `ANDLE A B` | A **≤** B | Alarm reset: temp recovered below threshold |
+
+Rung-opening equivalents (replace `AND` with `STR`): `STRGT`, `STRLT`, `STRGE`, `STRLE`.
+
+> ✅ Confirmed thermostat pattern (PRG_HVAC v2.113):
+> ```
+> // Cool: turn on when temp exceeds cool setpoint
+> STRE V1010 2
+> ANDN C350
+> ANDE D1064 2
+> ANDGT RX1 D1068
+> SET Y17
+>
+> // Heat: turn on when temp falls below heat setpoint
+> STRE V1010 2
+> ANDN C350
+> ANDE D1064 3
+> ANDLT RX1 D1072
+> SET Y18
+>
+> // Low temp alarm timer: runs while temp < heat setpoint
+> STRE V1010 2
+> ANDLT RX1 D1072
+> ANDN T60.Done
+> TMR T60 900000
+>
+> // Low temp alarm reset: clear when temp >= heat setpoint
+> STRE V1010 2
+> ANDGE RX1 D1072
+> AND C378
+> RST C378
+> ```
+
+> ⚠️ Do NOT use `ANDE`/`ANDNE` for temperature threshold comparisons — `ANDE` is equality (==) not less-than, and `ANDNE` is inequality (≠) not greater-than. This was a confirmed bug in v2.109–v2.112.
+
 ### OUT / SET / RST / RSTR ✅
 Output coils (terminate rung).
 ```
@@ -406,8 +453,8 @@ MOVE 1 V1000
 ```
 > ❌ Cannot MOVE a string literal — use STRPRINT instead.
 
-### ADDD ❌ / MATH ⚠️
-ADDD does not exist. MATH unconfirmed in text import.
+### ADDD ❌ / MATH ⚠️ / MUL ❌
+ADDD does not exist. MATH unconfirmed in text import. **MUL does not exist** — there is no 3-operand multiply instruction in text import format.
 
 ---
 
@@ -561,10 +608,9 @@ STRPRINT SS10 0x4 "SerialNum"
 
 > ⚠️ Use `left` justification to avoid leading spaces in MQTT payloads.
 
-**Example — publish RTD temperature as `"73.6"` from RX1 (tenths °F):**
+**Example — publish RTD temperature as `"73.6"` from RX1 (real °F):**
 ```
-// RX1 holds raw RTD value in tenths °F (e.g. 736 = 73.6°F)
-// FmtReal promotes the integer to Real, then formats with 1 decimal place
+// RX1 is a real register from the BX-RTD-4 module (e.g. 73.6°F)
 STRPRINT SS25 0x4 "FmtReal(RX1, 4, 1, dec, left)"
 // SS25 → "73.6"
 ```
@@ -701,12 +747,14 @@ STR2INT SS6 10 D1021 DST511    // "184156882" → DWORD 184156882 in D1021  (= 1
 | `FINDSTR` | Use `STRFIND` |
 | `STRGET` | Use `STRSUB` |
 | `ADDD` | Does not exist |
+| `MUL A B C` | Does not exist — no 3-operand multiply |
 | `T0.TT` / `T0.Run` | Not valid in text import |
 | `T0.Acc` (in normal ladder) | Not valid as MOVE destination in normal ladder — causes import error. Only valid in ST0 reset blocks. |
 | `DST0.Hour` / `DST0.Minute` | DST0 is scan counter, not datetime. Use `SDT0.Hour` / `SDT0.Minute` instead. |
 | V register as MQTTSUB destination | Import succeeds silently but no data is ever delivered. Use D registers instead. |
 | Multiple STR before OUT (parallel branches) | NOT valid in text import. Each STR starts a new rung. Use STR ST1 / RST + individual STR / SET pattern instead. See Rule 16. |
 | `STR ST1` before `STRE`/`ANDE`/`ANDNE` | Unnecessary — these are valid rung-opening instructions. Only use `STR ST1` when the rung must open unconditionally (before RST, MOVE, OUT with no condition). See Rule 17. |
+| `ANDE`/`ANDNE` for threshold comparisons | ❌ **Wrong** — `ANDE` means equal (==), `ANDNE` means not-equal (≠). Use `ANDGT`/`ANDLT`/`ANDGE`/`ANDLE` for greater-than/less-than comparisons. |
 
 ---
 
